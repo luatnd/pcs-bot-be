@@ -1,0 +1,82 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["interactiveTransactions", "fullTextSearch", "fullTextIndex"]
+}
+
+generator nestgraphql {
+  provider = "node node_modules/prisma-nestjs-graphql"
+  output   = "../src/prisma/@generated/graphql"
+}
+
+//generator nestgraphql {
+//  provider = "nestjs-prisma-graphql-crud-gen"
+//  output = "../src/prisma/@generated/crud"
+//}
+
+enum ChainName {
+  Eth
+  Bsc
+  Polygon
+  Avax
+  Flow
+  Near
+  Polkadot
+  Solana
+}
+
+// NOTE: Must be in sync with all 3 services
+model Chain {
+  name       ChainName @id @map("_id")
+  chain_id   Int
+  rpc_urls   String?     // rpc_url array in json string
+  created_at DateTime    @default(now())
+  updated_at DateTime    @updatedAt
+
+  @@map("chains")
+}
+
+model Pair {
+  // id = (base quote chain_id broker_id)
+  id                    String @id
+
+  base                  String
+  quote                 String
+  chain_id              Int
+  broker_id             String
+
+  data                  Json
+
+  created_at DateTime   @default(now())
+  updated_at DateTime   @updatedAt
+
+  @@map("pairs")
+}
+
+model Broker {
+  id String @id
+  name String
+
+  @@map("brokers")
+}
+
+model AppCacheInt {
+  key                  String   @id
+  value                String
+
+  @@map("app_cache_int")
+}
+
+model AppCacheString {
+  key                  String   @id
+  value                String
+
+  @@map("app_cache_string")
+}

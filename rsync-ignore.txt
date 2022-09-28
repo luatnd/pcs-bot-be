@@ -1,0 +1,53 @@
+.git
+prisma/migrations/
+*.sql
+
+
+
+# compiled output
+/dist
+/node_modules
+
+# Logs
+logs
+*.log
+*.logs
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+
+# Tests
+/coverage
+/.nyc_output
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# IDE - VSCode
+.vscode/*
+!.vscode/*
+db_data/*
+deploy/docker-compose.yml
+.env
+.env.local
+.env.dev
+log/.cc447406b352bf8b5e4d80eb8633ceed9bed5246-audit.json
+deploy/docker-compose-trial.yml
+logs.20a62100a3bf9ee2d250ab5a3713105ad0c72183-audit.json
+libs/prisma/src/@generated/*
+apps/main/src/schema.gql
+apps/admin/src/schema.gql
+apps/mission/src/schema.gql
+deploy/caddy/docker-compose.yml
+deploy/caddy/Caddyfile

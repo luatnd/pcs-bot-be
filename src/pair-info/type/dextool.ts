@@ -1,0 +1,106 @@
+export type DTResponseType = {
+  id: number;
+  jsonrpc: string;
+  result: ResponseResultType;
+};
+
+export type ResponseResultType = {
+  status: string;
+  data: {
+    event: string;
+    pair: DtPair;
+  };
+};
+
+export enum DtExchange {
+  pancakev2 = 'pancakev2',
+}
+
+export type DateStringISO = string;
+export type DateUnix = number;
+export type ContractAddress = string;
+export type DtPair = {
+  creation?: DtOnChainCreation;
+  info: {
+    locks: Array<any>;
+    address: ContractAddress;
+    holders: number;
+    decimals: number;
+    name: string;
+    symbol: string;
+    totalSupply: string; // wei string
+    maxSupplyFormatted: number;
+    totalSupplyFormatted: number;
+    totalSupplyFormattedUpdatedAt: DateStringISO;
+  };
+  team: {
+    wallet: string;
+  };
+
+  _id: string; // uid in mongo db ?
+  id: string; // contract address ?
+  exchange: DtExchange;
+  createdAt: DateStringISO;
+  updatedAt: DateUnix;
+  __v: number;
+  createdAtBlockNumber: number;
+  createdAtTimestamp: DateUnix;
+
+  token0: DTToken;
+  token1: DTToken;
+
+  tokenIndex: number;
+  type: string;
+  initialReserve0: number;
+  initialReserve1: number;
+  initialLiquidity: number;
+  initialLiquidityUpdatedAt: DateStringISO;
+  liquidity: number;
+  reserve0: number;
+  reserve1: number;
+  reserveUpdatedAt: DateStringISO;
+  txCount: number;
+};
+
+export type DtOnChainCreation = {
+  blockNumber: string; // block num in str
+  timeStamp: string; // unix ts in str
+  hash: string;
+  nonce: string; // nonce number in string
+  blockHash: string;
+  transactionIndex: string;
+  from: ContractAddress;
+  to: ContractAddress;
+  value: string;
+  gas: string;
+  gasPrice: string;
+  isError: string;
+  txreceipt_status: string;
+  input: string;
+  contractAddress: ContractAddress;
+  cumulativeGasUsed: string;
+  gasUsed: string;
+  confirmations: string;
+  methodId: string;
+  functionName: string;
+};
+
+export type DTToken = {
+  _id: string;
+  id: ContractAddress;
+  decimals: number;
+  name: string;
+  symbol: string;
+  audit: {
+    _id: string;
+    codeVerified: boolean;
+    date: DateStringISO;
+    lockTransactions: boolean;
+    mint: boolean;
+    proxy: boolean;
+    status: string;
+    unlimitedFees: boolean;
+    version: number;
+  };
+  totalSupply?: string;
+};

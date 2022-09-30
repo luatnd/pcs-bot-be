@@ -30,6 +30,10 @@ export class PairInfoServiceAuto implements OnModuleInit {
       onClose: () => {
         this.pairStreamStopped = true;
       },
+      ping: () => {
+        this.ws.ws.send('ping');
+      },
+      pingInterval: 10000,
     });
   }
 
@@ -88,7 +92,7 @@ export class PairInfoServiceAuto implements OnModuleInit {
 
   async handleLPCreation(pair: DtPair) {
     // create pool
-    return this.pairInfoService.createPool();
+    return this.pairInfoService.createPool(pair);
   }
 
   async handleLPUpdate(pair: DtPair) {

@@ -50,7 +50,7 @@ model Pair {
   base                  String
   quote                 String
   chain_id              Int
-  broker_id             String
+  exchange_id           String
 
   data                  Json
 

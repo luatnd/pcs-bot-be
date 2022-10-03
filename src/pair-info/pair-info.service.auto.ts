@@ -1,4 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import * as throttle from 'lodash.throttle';
+import * as LRUCache from 'lru-cache';
 import { WSService } from '../../libs/socket-client/socket-client.service';
 import { AppError } from '../../libs/errors/base.error';
 import { DtPair, DTResponseType } from './type/dextool';
@@ -12,6 +14,12 @@ export class PairInfoServiceAuto implements OnModuleInit {
 
   private subRetry = 0;
   private pairStreamStopped = true;
+  private allowListen = false;
+
+  // private pairThrottles: Record<string, any> = {};
+  private pairThrottles = new LRUCache({
+    max: 5,
+  });
 
   constructor(private pairInfoService: PairInfoService) {
     const url = process.env.SOCKET_URL;
@@ -25,7 +33,7 @@ export class PairInfoServiceAuto implements OnModuleInit {
         this.ensurePairEventStreamAlive();
       },
       onMessage: (message: any) => {
-        this.filterPairEvent(message);
+        this.allowListen && this.filterPairEvent(message);
       },
       onClose: () => {
         this.pairStreamStopped = true;
@@ -38,8 +46,8 @@ export class PairInfoServiceAuto implements OnModuleInit {
   }
 
   onModuleInit() {
-    this.logger.log('{onModuleInit}: Start WS listener');
-    this.ensurePairEventStreamAlive();
+    this.logger.log('{onModuleInit}: Start listen');
+    this.allowListen = true;
   }
 
   ensurePairEventStreamAlive() {
@@ -70,7 +78,7 @@ export class PairInfoServiceAuto implements OnModuleInit {
     }
   }
 
-  filterPairEvent(message: any) {
+  async filterPairEvent(message: any) {
     // console.log('{filterPairEvent} message: ', message);
 
     if (typeof message === 'string') {
@@ -90,28 +98,62 @@ export class PairInfoServiceAuto implements OnModuleInit {
       if (msg.result.data.event === 'update' && msg.result.status === 'ok') {
         const isPairCreationEvent = 'pair' in msg.result.data;
         if (isPairCreationEvent) {
+          // This is non-blocking
           this.handlePairEvent(msg.result.data.pair);
         }
       }
     }
   }
 
+  /**
+   * dextool fires update event sometime have creation sometime not,
+   * @param pair
+   */
   async handlePairEvent(pair: DtPair) {
-    if (pair.creation) {
-      await this.handleLPCreation(pair);
+    // if (pair.creation) {
+    //   await this.handleLPCreation(pair);
+    // }
+    // await this.handleLPUpdate(pair);
+
+    // if (pair.token0.symbol !== 'SPOOKYS') {
+    //   return;
+    // }
+
+    this.logger.debug('{handlePairEvent} : ' + this.pairInfoService.getPairName(pair));
+    this.updateOrCreateWithThrottle(pair);
+  }
+
+  /**
+   * Update or create pair with throttler
+   * It only applies for each single pair
+   */
+  updateOrCreateWithThrottle(p: DtPair) {
+    let throttleExecutor;
+    const pairUniqueId = this.pairInfoService.getPairIdFromDtPair(p);
+    if (this.pairThrottles.has(pairUniqueId)) {
+      // get executor
+      throttleExecutor = this.pairThrottles.get(pairUniqueId);
+    } else {
+      // create and cache the executor
+      throttleExecutor = throttle((pair) => {
+        this.pairInfoService.updateOrCreatePool(pair);
+      }, 1000);
+      this.pairThrottles.set(pairUniqueId, throttleExecutor);
     }
-    this.handleLPUpdate(pair);
+
+    // run it
+    throttleExecutor(p);
   }
 
-  async handleLPCreation(pair: DtPair) {
-    // create pool
-    this.logger.debug('{handleLPCreation} : ', this.pairInfoService.getPairName(pair));
-    return this.pairInfoService.createPool(pair);
-  }
+  // async handleLPCreation(pair: DtPair) {
+  //   // create pool
+  //   this.logger.debug('{handleLPCreation} : ', this.pairInfoService.getPairName(pair));
+  //   return this.pairInfoService.createPool(pair);
+  // }
 
-  async handleLPUpdate(pair: DtPair) {
-    // update pair price and other trading info to db
-    this.logger.debug('{handleLPUpdate} : ', this.pairInfoService.getPairName(pair));
-    return this.pairInfoService.updatePool();
-  }
+  // async handleLPUpdate(pair: DtPair) {
+  //   // update pair price and other trading info to db
+  //   this.logger.debug('{handleLPUpdate} : ', this.pairInfoService.getPairName(pair));
+  //   return this.pairInfoService.updatePool();
+  // }
 }

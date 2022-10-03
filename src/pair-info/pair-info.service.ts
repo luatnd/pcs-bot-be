@@ -34,4 +34,8 @@ export class PairInfoService {
   async updateTradingInfo() {
     //
   }
+
+  getPairName(p: DtPair): string {
+    return `${p.token0.symbol}/${p.token1.symbol}`;
+  }
 }

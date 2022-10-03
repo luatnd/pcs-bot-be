@@ -135,7 +135,7 @@ export class WSService {
   }
 
   onMessage(message: any) {
-    this.logger.log('{WSService.onMessage} message: ', message);
+    // this.logger.log('{WSService.onMessage} message: ', message);
     this.opt.onMessage && this.opt.onMessage(message);
   }
 }

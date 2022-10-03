@@ -21,7 +21,7 @@ export class PairInfoServiceAuto implements OnModuleInit {
 
     this.ws = new WSService(url, {
       onConnected: () => {
-        console.log('{PairInfoServiceAuto.onConnected} : ');
+        this.logger.log('{onConnected} : ');
         this.ensurePairEventStreamAlive();
       },
       onMessage: (message: any) => {
@@ -38,7 +38,7 @@ export class PairInfoServiceAuto implements OnModuleInit {
   }
 
   onModuleInit() {
-    this.logger.log('{PairInfoServiceAuto.onModuleInit}: Start WS listener');
+    this.logger.log('{onModuleInit}: Start WS listener');
     this.ensurePairEventStreamAlive();
   }
 
@@ -49,9 +49,9 @@ export class PairInfoServiceAuto implements OnModuleInit {
   }
 
   subscribePairEvents() {
-    console.log('{PairInfoServiceAuto.subscribePairEvents} this.ws.readyState: ', this.ws.ws.readyState);
+    this.logger.log('{subscribePairEvents} this.ws.readyState: ', this.ws.ws.readyState);
     if (this.ws.isReady()) {
-      console.log('{PairInfoServiceAuto.subscribePairEvents} ready => SendObject');
+      this.logger.log('{subscribePairEvents} ready => SendObject');
       const pairSubscribeMsg = {
         jsonrpc: '2.0',
         method: 'subscribe',
@@ -71,14 +71,27 @@ export class PairInfoServiceAuto implements OnModuleInit {
   }
 
   filterPairEvent(message: any) {
-    console.log('{filterPairEvent} message: ', message);
+    // console.log('{filterPairEvent} message: ', message);
 
     if (typeof message === 'string') {
-      const msg: DTResponseType = JSON.parse(message);
+      if (message === 'pong') {
+        this.logger.log(message);
+        return;
+      }
+
+      let msg: DTResponseType;
+      try {
+        msg = JSON.parse(message);
+      } catch (e) {
+        this.logger.error('{filterPairEvent} e, message: ', e, message);
+        return;
+      }
 
       if (msg.result.data.event === 'update' && msg.result.status === 'ok') {
         const isPairCreationEvent = 'pair' in msg.result.data;
-        this.handlePairEvent(msg.result.data.pair);
+        if (isPairCreationEvent) {
+          this.handlePairEvent(msg.result.data.pair);
+        }
       }
     }
   }
@@ -92,11 +105,13 @@ export class PairInfoServiceAuto implements OnModuleInit {
 
   async handleLPCreation(pair: DtPair) {
     // create pool
+    this.logger.debug('{handleLPCreation} : ', this.pairInfoService.getPairName(pair));
     return this.pairInfoService.createPool(pair);
   }
 
   async handleLPUpdate(pair: DtPair) {
     // update pair price and other trading info to db
+    this.logger.debug('{handleLPUpdate} : ', this.pairInfoService.getPairName(pair));
     return this.pairInfoService.updatePool();
   }
 }

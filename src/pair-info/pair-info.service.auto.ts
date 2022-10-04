@@ -45,10 +45,13 @@ export class PairInfoServiceAuto implements OnModuleInit {
 
   onModuleInit() {
     this.logger.log('{onModuleInit}: Start listen');
-    this.allowListen = true;
-    setTimeout(() => {
-      this.startObserver();
-    }, 10000);
+    // this.allowListen = true;
+
+    if (this.allowListen) {
+      setTimeout(() => {
+        this.startObserver();
+      }, 10000);
+    }
   }
 
   startObserver() {

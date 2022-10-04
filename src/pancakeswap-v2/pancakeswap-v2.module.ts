@@ -3,5 +3,6 @@ import { PancakeswapV2Service } from './pancakeswap-v2.service';
 
 @Module({
   providers: [PancakeswapV2Service],
+  exports: [PancakeswapV2Service],
 })
 export class PancakeswapV2Module {}

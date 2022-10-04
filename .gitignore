@@ -1,4 +1,5 @@
 # secrets
+.env
 secrets/*
 src/schema.gql
 src/prisma/@generated

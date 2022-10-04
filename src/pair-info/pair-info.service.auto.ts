@@ -10,6 +10,7 @@ import { PairInfoService } from './pair-info.service';
 export class PairInfoServiceAuto implements OnModuleInit {
   private readonly logger = new Logger(PairInfoServiceAuto.name);
 
+  // Nothing work if no ws event so this ws can be init later
   private ws: WSService;
 
   private subRetry = 0;
@@ -21,13 +22,10 @@ export class PairInfoServiceAuto implements OnModuleInit {
     max: 5,
   });
 
-  constructor(private pairInfoService: PairInfoService) {
-    const url = process.env.LP_DATA_SRC_SOCKET_URL;
-    if (!url) {
-      throw new AppError('process.env.LP_DATA_SRC_SOCKET_URL was not configured', 'InvalidEnv');
-    }
+  constructor(private pairInfoService: PairInfoService) {}
 
-    this.ws = new WSService(url, {
+  getWSService(url: string) {
+    return new WSService(url, {
       onConnected: () => {
         this.logger.log('{onConnected} : ');
         this.ensurePairEventStreamAlive();
@@ -48,6 +46,18 @@ export class PairInfoServiceAuto implements OnModuleInit {
   onModuleInit() {
     this.logger.log('{onModuleInit}: Start listen');
     this.allowListen = true;
+    setTimeout(() => {
+      this.startObserver();
+    }, 10000);
+  }
+
+  startObserver() {
+    const url = process.env.LP_DATA_SRC_SOCKET_URL;
+    if (!url) {
+      throw new AppError('process.env.LP_DATA_SRC_SOCKET_URL was not configured', 'InvalidEnv');
+    }
+
+    this.ws = this.getWSService(url);
   }
 
   ensurePairEventStreamAlive() {

@@ -7,6 +7,10 @@ import { TradingIntendCreateInput } from '../prisma/@generated/graphql/trading-i
 import { TradingIntendType } from '../prisma/@generated/graphql/prisma/trading-intend-type.enum';
 import { DtExchange, DtPairDynamicData } from '../pair-info/type/dextool';
 import { PancakeswapV2Service } from '../pancakeswap-v2/pancakeswap-v2.service';
+// eslint-disable-next-line max-len
+import { PairDynamicDataCreateInput } from '../prisma/@generated/graphql/pair-dynamic-data/pair-dynamic-data-create.input';
+import { PrismaErrorCode } from '../prisma/const';
+import { TradingIntend } from '../prisma/@generated/graphql/trading-intend/trading-intend.model';
 
 type PairId = string;
 
@@ -37,7 +41,8 @@ export class NewPairTradingService {
     this.logger.log('{handleLpCreatedEvent} : ' + payload.id);
 
     const d = payload.data as DtPairDynamicData;
-    const pairDynamicDataRecord = {
+    const pairDynamicDataRecord: PairDynamicDataCreateInput = {
+      pair_id: payload.id,
       initialReserve0: d.initialReserve0,
       initialReserve1: d.initialReserve1,
       initialLiquidity: d.initialLiquidity,
@@ -48,10 +53,7 @@ export class NewPairTradingService {
       reserveUpdatedAt: d.reserveUpdatedAt,
     };
     const r = await this.prisma.pairDynamicData.create({
-      data: {
-        pair_id: payload.id,
-        ...pairDynamicDataRecord,
-      },
+      data: pairDynamicDataRecord,
     });
 
     this.startNewPairTradingFlow(payload);
@@ -83,14 +85,49 @@ export class NewPairTradingService {
       reserve1: d.reserve1,
       reserveUpdatedAt: d.reserveUpdatedAt,
     };
-    const r = await this.prisma.pairDynamicData.update({
-      where: { pair_id: pairId },
-      data: pairDynamicDataRecord,
-    });
 
-    await this.tryPlaceEntry(payload);
-    await this.tryTp(payload);
-    await this.trySl(payload);
+    try {
+      const r = await this.prisma.pairDynamicData.update({
+        where: { pair_id: pairId },
+        data: pairDynamicDataRecord,
+      });
+    } catch (e) {
+      if (e.code === PrismaErrorCode.RecordNotFound) {
+        return;
+      }
+
+      this.logger.error('{handleLpUpdatedEvent} e.code, e: ' + e.code, e);
+    }
+
+    let tradingIntent: TradingIntend;
+    try {
+      tradingIntent = await this.prisma.tradingIntend.findFirst({
+        where: {
+          pair_id: pairId,
+          status: TradingIntendStatus.FindingEntry,
+        },
+      });
+
+      // try place entry if status = FindingEntry
+      if (!!tradingIntent) {
+        await this.tryPlaceEntry(payload);
+      }
+    } catch (e) {}
+
+    try {
+      tradingIntent = await this.prisma.tradingIntend.findFirst({
+        where: {
+          pair_id: pairId,
+          status: TradingIntendStatus.FindingExit,
+        },
+      });
+
+      if (!!tradingIntent) {
+        // try tp or sl if status=FindingExit
+        await this.tryTp(payload);
+        await this.trySl(payload);
+      }
+    } catch (e) {}
   }
 
   @OnEvent('lp.price_updated', { async: true })
@@ -176,24 +213,25 @@ export class NewPairTradingService {
     this.activeTradingPairs.delete(p.id);
   }
 
-  async tryPlaceEntry(p: PairCreateInput) {
+  async tryPlaceEntry(p: PairCreateInput, tradingIntent?: TradingIntend) {
     if (!this.isActiveTradingPair(p.id)) {
       this.logger.debug('Not isActiveTradingPair: ' + p.id);
       return;
     }
 
-    let tradingIntent;
-    try {
-      tradingIntent = await this.prisma.tradingIntend.findFirst({
-        where: {
-          pair_id: p.id,
-          status: TradingIntendStatus.FindingEntry,
-        },
-      });
-    } catch (e) {
-      this.logger.error('{tryPlaceEntry} e.code: ' + e.code, e); // TODO: comment out this log
-      this.logger.warn('{tryPlaceEntry} Cannot find FindingEntry pair for: ' + p.id);
-      return;
+    if (!tradingIntent) {
+      try {
+        tradingIntent = await this.prisma.tradingIntend.findFirst({
+          where: {
+            pair_id: p.id,
+            status: TradingIntendStatus.FindingEntry,
+          },
+        });
+      } catch (e) {
+        this.logger.error('{tryPlaceEntry} e.code: ' + e.code, e); // TODO: comment out this log
+        this.logger.warn('{tryPlaceEntry} Cannot find FindingEntry pair for: ' + p.id);
+        return;
+      }
     }
 
     const lpSizeInToken = (p.data as DtPairDynamicData).liquidity;

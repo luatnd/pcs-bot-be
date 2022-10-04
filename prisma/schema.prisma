@@ -60,16 +60,143 @@ model Pair {
   @@map("pairs")
 }
 
-model Broker {
+//
+model PairTradingQuote {
+  id                    String @id // has 1-1 relationship with Pair, so the same id was used
+  price                 String
+  current_gas           Float
+  slip_page             Float
+  min_receive           Float // 1 base = ? minimum quote we can get if trade finish
+
+  created_at DateTime   @default(now())
+  updated_at DateTime   @updatedAt
+
+  @@map("pair_trading_quotes")
+}
+
+model PairDynamicData {
+  pair_id         String       @id
+
+  // Copy from inside of Pair.data
+  initialReserve0 Float
+  initialReserve1 Float
+  initialLiquidity Float
+  initialLiquidityUpdatedAt DateTime
+  liquidity Float
+  reserve0 Float
+  reserve1 Float
+  reserveUpdatedAt DateTime
+
+  created_at DateTime   @default(now())
+  updated_at DateTime   @updatedAt
+
+  @@map("pair_dynamic_data")
+}
+
+model PairRealtimeQuote {
+  pair_id         String       @id
+
+  // from pcs
+  current_price   Decimal @db.Decimal(24,12)
+  price_impact    Decimal @db.Decimal(24,12)
+
+  created_at      DateTime   @default(now())
+  updated_at      DateTime   @updatedAt
+
+  @@map("pair_realtime_quote")
+}
+
+model Exchanges {
   id String @id
   name String
 
-  @@map("brokers")
+  @@map("exchanges")
+}
+
+enum TradingIntendStatus {
+                  // from top to bottom
+  Deleted         // was soft deleted
+  Created         // has just created but do not intend to trade
+  FindingEntry    // trade started, be going to place an entry
+  FindingExit     // be going to tp/sl
+  TP              // Finished by tp order
+  SL              // Finished by sl order
+}
+enum TradingIntendType {
+  Auto        // Auto trade on new pair
+  OnRedList   // Only trade the pair exists on the red list
+}
+model TradingIntend {
+  id                  Int       @id @default(autoincrement())
+  pair_id             String
+  type                TradingIntendType
+  entry               Decimal @db.Decimal(24,12)
+  tp                  Decimal @db.Decimal(24,12)
+  sl                  Decimal @db.Decimal(24,12)
+  status              TradingIntendStatus
+
+  created_at DateTime   @default(now())
+  updated_at DateTime   @updatedAt
+
+  @@index([pair_id])
+  @@index([status])
+  @@map("trading_intends")
+}
+
+//
+// The current active trading contract app need to focus on
+//
+model TradingDirectiveRedListContract {
+  id                  Int       @id @default(autoincrement())
+  contract            String
+  created_at          DateTime   @default(now())
+  updated_at          DateTime   @updatedAt
+
+  @@index([contract])
+  @@map("trading_directive_red_list_contracts")
+}
+
+model TradingDirectiveAutoConfig {
+  id                         Int       @id @default(autoincrement())
+  // if tp_target=1.5 then we will tp at current_price = 1.5 * entry_price
+  tp_target                  Decimal @db.Decimal(6,2)
+  sl_notice_target           Decimal @db.Decimal(6,2)
+  sl_target                  Decimal @db.Decimal(6,2)
+
+  // How many USD you wanna spent for a single pair?
+  pair_budget_usd            Decimal @db.Decimal(6,2)
+
+  @@map("trading_directive_auto_config")
+}
+
+// Save change version of
+// model TradingIntendVersions {
+//   id                  Int       @id @default(autoincrement())
+//   trading_intend_id   Int
+//
+//   pair_id             String
+//   entry               String
+//   tp                  String
+//   sl                  String
+//   status              TradingIntendStatus
+// }
+
+
+
+model AppConfig {
+  key                  String   @id
+  value                String
+
+  created_at           DateTime   @default(now())
+  updated_at           DateTime   @updatedAt
+
+  @@map("app_configs")
 }
 
 model AppCacheInt {
   key                  String   @id
   value                String
+  updated_at           DateTime   @updatedAt
 
   @@map("app_cache_int")
 }
@@ -77,6 +204,7 @@ model AppCacheInt {
 model AppCacheString {
   key                  String   @id
   value                String
+  updated_at           DateTime   @updatedAt
 
   @@map("app_cache_string")
 }

@@ -22,9 +22,9 @@ export class PairInfoServiceAuto implements OnModuleInit {
   });
 
   constructor(private pairInfoService: PairInfoService) {
-    const url = process.env.SOCKET_URL;
+    const url = process.env.LP_DATA_SRC_SOCKET_URL;
     if (!url) {
-      throw new AppError('process.env.SOCKET_URL was not configured', 'InvalidEnv');
+      throw new AppError('process.env.LP_DATA_SRC_SOCKET_URL was not configured', 'InvalidEnv');
     }
 
     this.ws = new WSService(url, {

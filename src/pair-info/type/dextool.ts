@@ -19,7 +19,8 @@ export enum DtExchange {
 export type DateStringISO = string;
 export type DateUnix = number;
 export type ContractAddress = string;
-export type DtPair = {
+export type DtPair = DtPairStaticData & DtPairDynamicData;
+export type DtPairStaticData = {
   creation?: DtOnChainCreation;
   info: {
     locks: Array<any>;
@@ -51,6 +52,9 @@ export type DtPair = {
 
   tokenIndex: number;
   type: string;
+};
+export type DtPairDynamicData = {
+  // for trading
   initialReserve0: number;
   initialReserve1: number;
   initialLiquidity: number;
@@ -59,6 +63,8 @@ export type DtPair = {
   reserve0: number;
   reserve1: number;
   reserveUpdatedAt: DateStringISO;
+  // end for trading
+
   txCount: number;
 };
 

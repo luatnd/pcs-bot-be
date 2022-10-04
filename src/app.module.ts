@@ -1,20 +1,25 @@
 /* eslint-disable no-unused-vars */
 import { CacheModule, Module } from '@nestjs/common';
+import { GraphQLModule } from '@nestjs/graphql';
+import { ApolloDriver } from '@nestjs/apollo';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
+
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AppResolver } from './app.resolver';
 import { PrismaModule } from './prisma/prisma.module';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ScheduleModule } from '@nestjs/schedule';
 import { BlockchainModule } from './blockchain/blockchain.module';
-import { GraphQLModule } from '@nestjs/graphql';
-import { ApolloDriver } from '@nestjs/apollo';
 import { PairInfoModule } from './pair-info/pair-info.module';
+import { NewPairTradingModule } from './new-pair-trading/new-pair-trading.module';
+import { PairRealtimeDataModule } from './pair-realtime-data/pair-realtime-data.module';
+import { PancakeswapV2Module } from './pancakeswap-v2/pancakeswap-v2.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    CacheModule.register({ isGlobal: true, ttl: 5 * 60 }),
+    CacheModule.register({ isGlobal: true }),
     GraphQLModule.forRootAsync({
       driver: ApolloDriver,
       imports: [ConfigModule],
@@ -35,11 +40,16 @@ import { PairInfoModule } from './pair-info/pair-info.module';
         };
       },
     }),
-    CacheModule.register({ isGlobal: true, ttl: 5 * 60 }),
     ScheduleModule.forRoot(),
+    EventEmitterModule.forRoot({
+      verboseMemoryLeak: true,
+    }),
     PrismaModule,
     BlockchainModule,
     PairInfoModule,
+    NewPairTradingModule,
+    PairRealtimeDataModule,
+    PancakeswapV2Module,
   ],
   controllers: [AppController],
   providers: [AppService, AppResolver],

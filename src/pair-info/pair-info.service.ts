@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service';
 import { DtPair } from './type/dextool';
 import { PairCreateInput } from '../prisma/@generated/graphql/pair/pair-create.input';
@@ -9,7 +10,7 @@ import { PrismaErrorCode } from '../prisma/const';
 export class PairInfoService {
   private readonly logger = new Logger(PairInfoService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private eventEmitter: EventEmitter2) {}
 
   getPairId(p: PairCreateInput) {
     return `${p.base}_${p.quote}_${p.chain_id}_${p.exchange_id}`;
@@ -69,14 +70,14 @@ export class PairInfoService {
 
   // @Event: Pool created to db
   async onPoolCreated(pair: PairCreateInput) {
-    this.logger.log('OK {onPoolCreated} : ' + pair.id);
-    // TODO: Fire message to trigger trade system?
+    // this.logger.log('OK {onPoolCreated} : ' + pair.id);
+    this.eventEmitter.emit('lp.created', pair);
   }
 
   // @Event: Pool updated to db
   async onPoolUpdated(pair: PairCreateInput) {
-    this.logger.log('OK {onPoolUpdated} : ' + pair.id);
-    // TODO: Fire message to trigger trade system?
+    // this.logger.log('OK {onPoolUpdated} : ' + pair.id);
+    this.eventEmitter.emit('lp.updated', pair);
   }
 
   private toAppPair(dtPair: DtPair): PairCreateInput {

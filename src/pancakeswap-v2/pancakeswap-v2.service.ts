@@ -5,6 +5,7 @@ import { Contract, ethers, Wallet } from 'ethers';
 import { ConfigService } from '@nestjs/config';
 import { ContractAddress } from '../pair-info/type/dextool';
 import EthersServer from '../blockchain/_utils/EthersServer';
+import { AppError } from '../../libs/errors/base.error';
 
 @Injectable()
 export class PancakeswapV2Service {
@@ -32,39 +33,14 @@ export class PancakeswapV2Service {
     this.wallet = this.getAppWallet();
   }
 
-  async getQuotes(baseAddress: ContractAddress, quoteAddress: ContractAddress, baseAmountInToken: number) {
-    // TODO: Urgent here
-
-    const DAI = new Token(this.getChainId(), '0x6B175474E89094C44Da98b954EedeAC495271d0F', 18);
-
-    // note that you may want/need to handle this async code differently,
-    // for example if top-level await is not an option
-    const pair = await Fetcher.fetchPairData(DAI, WETH[DAI.chainId]);
-
-    const route = new Route([pair], WETH[DAI.chainId]);
-
-    const trade = new Trade(route, new TokenAmount(WETH[DAI.chainId], '1000000000000000000'), TradeType.EXACT_INPUT);
-
-    console.log(trade.executionPrice.toSignificant(6));
-    console.log(trade.nextMidPrice.toSignificant(6));
-  }
-
-  async swap() {
-    //
-  }
-
-  /**
-   * @throws Error
-   */
-  async swapExactETHForToken(base: Token, quote: Token, amount: string, slippage = '50') {
+  async getQuotes(base: Token, quote: Token, amount: string, slippage = '50') {
     const provider = this.provider;
-    const wallet = this.wallet;
 
     const pair = await Fetcher.fetchPairData(base, quote, provider); //creating instances of a pair
     const route = await new Route([pair], base); // a fully specified path from input token to output token
     // console.log('{swapExactETHForToken} route: ', route);
     // console.log('{swapExactETHForToken} route.pairs: ', JSON.stringify(route.pairs[0]));
-    console.log('{swapExactETHForToken} mid_price: ', route.midPrice.toSignificant()); // 1 base = ? quote
+    // console.log('{swapExactETHForToken} mid_price: ', route.midPrice.toSignificant()); // 1 base = ? quote
 
     const amountInBN = ethers.utils.parseEther(amount.toString()); //helper function to convert ETH to Wei
     const amountIn = amountInBN.toString();
@@ -75,20 +51,48 @@ export class PancakeswapV2Service {
     const trade = new Trade(route, new TokenAmount(base, amountIn), TradeType.EXACT_INPUT);
 
     // console.log('{swapExactETHForToken} trade: ', trade);
-    console.log('{swapExactETHForToken} trade.executionPrice: ', trade.executionPrice.toSignificant());
-    console.log('{swapExactETHForToken} trade.nextMidPrice: ', trade.nextMidPrice.toSignificant());
-    console.log('{swapExactETHForToken} trade.priceImpact: ', trade.priceImpact.toSignificant());
+    // console.log('{swapExactETHForToken} trade.executionPrice: ', trade.executionPrice.toSignificant());
+    // console.log('{swapExactETHForToken} trade.nextMidPrice: ', trade.nextMidPrice.toSignificant());
+    // console.log('{swapExactETHForToken} trade.priceImpact: ', trade.priceImpact.toSignificant());
 
     // Only for input as base: Minimum received if buying in gwei
     const minimumAmountOut = trade.minimumAmountOut(slippageTolerance).raw.toString();
     // Only for input as quote: Maximum sold if selling in gwei
-    const maximumAmountIn = trade.maximumAmountIn(slippageTolerance).raw.toString();
+    // const maximumAmountIn = trade.maximumAmountIn(slippageTolerance).raw.toString();
 
-    console.log(
-      '{PancakeswapV2Service.swapExactETHForToken} minimumAmountOut, maximumAmountIn: ',
+    // console.log(
+    //   '{PancakeswapV2Service.swapExactETHForToken} minimumAmountOut, maximumAmountIn: ',
+    //   minimumAmountOut,
+    //   maximumAmountIn,
+    // );
+
+    return {
+      trade,
+      midPrice: route.midPrice,
+      executionPrice: trade.executionPrice,
+      nextMidPrice: trade.nextMidPrice,
+      priceImpact: trade.priceImpact,
       minimumAmountOut,
-      maximumAmountIn,
-    );
+    };
+  }
+
+  async swapUnsafe(base: Token, quote: Token, amount: string, slippage = '50') {
+    const { trade, minimumAmountOut } = await this.getQuotes(base, quote, amount, slippage);
+    return this.swapExactETHForTokenWithTradeObject(trade, minimumAmountOut, base, quote);
+  }
+
+  /**
+   * @throws Error
+   */
+  async swapExactETHForTokenWithTradeObject(
+    trade: Trade,
+    minimumAmountOut: string,
+    base: Token,
+    quote: Token,
+    // amount: string,
+    // slippage = '50',
+  ) {
+    const wallet = this.wallet;
 
     const amountOutMinHex = ethers.BigNumber.from(minimumAmountOut).toHexString();
 
@@ -115,11 +119,15 @@ export class PancakeswapV2Service {
     try {
       sendTxn = await wallet.sendTransaction(rawTxn);
     } catch (e) {
-      console.log('{swapExactETHForToken.sendTransaction} e.code, e: ' + e.code, e);
-
       if (e.code === 'INSUFFICIENT_FUNDS') {
+        // eslint-disable-next-line max-len
+        throw new AppError(
+          'swapExactETHForToken.sendTransaction: insufficient funds for intrinsic transaction cost',
+          e.code,
+        );
       }
 
+      console.log('{swapExactETHForToken.sendTransaction} e.code: ' + e.code);
       throw e;
     }
 

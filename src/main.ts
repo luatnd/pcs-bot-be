@@ -2,24 +2,14 @@ import { NestApplicationOptions, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
-import { AppLogger } from './utils/logger';
+import { getAppLogger } from './utils/logger';
 import { buildCorsOption } from './utils/cors';
 import { AppErrorsInterceptor } from './utils/errors.interceptor';
 import { Sentry } from './utils/sentry.service';
 import { ConsoleLoggerOptions } from '@nestjs/common/services/console-logger.service';
 
 async function bootstrap() {
-  const logLevelsEnv = process.env.LOG_LEVELS_CONSOLE;
-  const loggerOpt: ConsoleLoggerOptions = {};
-  if (logLevelsEnv) {
-    const levels = JSON.parse(logLevelsEnv);
-    if (Array.isArray(levels)) {
-      loggerOpt.logLevels = levels;
-    } else {
-      throw new Error('process.env.LOG_LEVELS must be an valid JSON array');
-    }
-  }
-  const logger = new AppLogger('app', loggerOpt);
+  const logger = getAppLogger();
 
   const nestAppOpt: NestApplicationOptions = {
     logger: logger,

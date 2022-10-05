@@ -61,3 +61,19 @@ export class AppLogger extends ConsoleLogger {
     this.fileLogger.verbose.apply(this.fileLogger, arguments);
   }
 }
+
+export function getAppLogger(): AppLogger {
+  const logLevelsEnv = process.env.LOG_LEVELS_CONSOLE;
+  const loggerOpt: ConsoleLoggerOptions = {};
+  if (logLevelsEnv) {
+    const levels = JSON.parse(logLevelsEnv);
+    if (Array.isArray(levels)) {
+      loggerOpt.logLevels = levels;
+    } else {
+      throw new Error('process.env.LOG_LEVELS must be an valid JSON array');
+    }
+  }
+  const logger = new AppLogger('app', loggerOpt);
+
+  return logger;
+}

@@ -247,7 +247,9 @@ export class NewPairTradingService {
 
   async tryPlaceEntry(p: PairCreateInput, tradingIntent?: TradingIntend) {
     if (!this.isActiveTradingPair(p.id)) {
+      console.log('{tryPlaceEntry} test: ');
       this.logger.debug('Not isActiveTradingPair: ' + p.id);
+      throw new Error('ASFASF');
       return;
     }
 
@@ -288,7 +290,9 @@ export class NewPairTradingService {
     // LP must be big enough
     const lpSizeInToken = (p.data as DtPairDynamicData).liquidity;
     const lpSizeUsd = lpSizeInToken; // TODO: Check it
-    console.log('{tryPlaceEntry} lpSizeUsd: ', lpSizeUsd);
+    console.log('{tryPlaceEntry}2 lpSizeUsd: ', lpSizeUsd);
+    this.logger.log('{tryPlaceEntry}1 lpSizeUsd: ', lpSizeUsd);
+    throw new Error('STOP');
     return;
 
     const tradingDirectiveAutoConfig = await this.prisma.tradingDirectiveAutoConfig.findFirst();

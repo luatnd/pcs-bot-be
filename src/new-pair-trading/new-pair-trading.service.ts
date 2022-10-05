@@ -191,7 +191,7 @@ export class NewPairTradingService {
   }
 
   async createTradingIntend(p: PairCreateInput) {
-    const existIntend = this.prisma.tradingIntend.findFirst({
+    const existIntend = await this.prisma.tradingIntend.findFirst({
       where: {
         pair_id: p.id,
         status: TradingIntendStatus.FindingEntry,
@@ -258,8 +258,12 @@ export class NewPairTradingService {
           return;
         }
       } catch (e) {
-        this.logger.error('{tryPlaceEntry} e.code: ' + e.code, e); // TODO: comment out this log
-        this.logger.warn('{tryPlaceEntry} SKIP: Cannot find tradingIntent FindingEntry pair for: ' + p.id);
+        // this.logger.error('{tryPlaceEntry} e.code: ' + e.code, e);
+        this.logger.warn(
+          '{tryPlaceEntry} SKIP: Cannot find tradingIntent FindingEntry pair for: ' + p.id + ' with error:',
+          e.code,
+          e,
+        );
         return;
       }
     }

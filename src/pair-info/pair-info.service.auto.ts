@@ -45,7 +45,7 @@ export class PairInfoServiceAuto implements OnModuleInit {
 
   onModuleInit() {
     this.logger.log('{onModuleInit}: Start listen');
-    // this.allowListen = true;
+    this.allowListen = true;
 
     if (this.allowListen) {
       setTimeout(() => {
@@ -117,6 +117,11 @@ export class PairInfoServiceAuto implements OnModuleInit {
         msg = JSON.parse(message);
       } catch (e) {
         this.logger.error('{filterPairEvent} e, message: ', e, message);
+        return;
+      }
+
+      if (typeof msg.result.data === 'string') {
+        // Skip some non data message
         return;
       }
 

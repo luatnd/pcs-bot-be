@@ -22,6 +22,11 @@ export class PairInfoServiceAuto implements OnModuleInit {
     max: 5,
   });
 
+  private singlePairModeData = {
+    enabled: false,
+    pairOnChainId: null,
+  };
+
   constructor(private pairInfoService: PairInfoService) {}
 
   getWSService(url: string) {
@@ -103,6 +108,28 @@ export class PairInfoServiceAuto implements OnModuleInit {
     }
   }
 
+  /**
+   * @param pairOnChainId null or empty mean for all pairs, disable single mode
+   */
+  setSinglePairModeFor(pairOnChainId: string) {
+    this.singlePairModeData.enabled = !!pairOnChainId;
+    if (this.singlePairModeData.enabled) {
+      this.logger.warn('[Runtime] Single pair mode ENABLED for ' + pairOnChainId + '\n');
+    } else {
+      this.logger.warn('[Runtime] Single pair mode DISABLED from ' + this.singlePairModeData.pairOnChainId + '\n');
+    }
+
+    this.singlePairModeData.pairOnChainId = pairOnChainId;
+  }
+
+  isSinglePairMode(): boolean {
+    return this.singlePairModeData.enabled;
+  }
+
+  getSinglePairModePairKey(): string {
+    return this.singlePairModeData.pairOnChainId;
+  }
+
   async filterPairEvent(message: any) {
     // console.log('{filterPairEvent} message: ', message);
 
@@ -152,6 +179,15 @@ export class PairInfoServiceAuto implements OnModuleInit {
     // if (pair.token0.symbol !== 'SPOOKYS') {
     //   return;
     // }
+
+    // Skip all other pairs if in single pair mode
+    if (this.isSinglePairMode()) {
+      const allowedPairOnChainId = this.getSinglePairModePairKey();
+      const pairOnChainId = pair.id;
+      if (pairOnChainId !== allowedPairOnChainId) {
+        return;
+      }
+    }
 
     this.logger.debug('{handlePairEvent} : ' + this.pairInfoService.getPairName(pair));
     this.updateOrCreateWithThrottle(pair);

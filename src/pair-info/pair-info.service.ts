@@ -89,6 +89,7 @@ export class PairInfoService {
   private toAppPair(dtPair: DtPair): PairCreateInput {
     const pair: PairCreateInput = {
       id: '',
+      on_chain_id: dtPair.id,
       base: dtPair.token0.symbol.trim(),
       quote: dtPair.token1.symbol.trim(),
       chain_id: this.getChainId(dtPair),

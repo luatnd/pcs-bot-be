@@ -44,9 +44,9 @@ export class NewPairTradingService {
     const d = payload.data as DtPairDynamicData;
     const pairDynamicDataRecord: PairDynamicDataCreateInput = {
       pair_id: payload.id,
-      initialReserve0: d.initialReserve0,
-      initialReserve1: d.initialReserve1,
-      initialLiquidity: d.initialLiquidity,
+      initialReserve0: d.initialReserve0, // If pool just created without reverse => initialReserve0 = -1
+      initialReserve1: d.initialReserve1, // If pool just created without reverse => initialReserve0 = -1
+      initialLiquidity: d.initialLiquidity, // If pool just created without reverse => initialReserve0 = undefined
       initialLiquidityUpdatedAt: d.initialLiquidityUpdatedAt,
       liquidity: d.liquidity,
       reserve0: d.reserve0,
@@ -54,11 +54,15 @@ export class NewPairTradingService {
       reserveUpdatedAt: d.reserveUpdatedAt,
     };
 
-    // throw then exit => Stop setup if pair already exist
-    // const r =
-    await this.prisma.pairDynamicData.create({
-      data: pairDynamicDataRecord,
-    });
+    // Stop setup if pair already exist
+    try {
+      await this.prisma.pairDynamicData.create({
+        data: pairDynamicDataRecord,
+      });
+    } catch (e) {
+      this.logger.error('{handleLpCreatedEvent} e.code, e: ', e.code, e);
+      return;
+    }
 
     this.startNewPairTradingFlow(payload);
   }
@@ -159,6 +163,11 @@ export class NewPairTradingService {
     await this.tryPlaceEntry(payload);
     await this.tryTp(payload);
     await this.trySl(payload);
+  }
+
+  async handleLpRugPullOrIgnoreIt(payload: PairCreateInput) {
+    // TODO: Listen to LP update event then if LP is too low then disable it from pair table
+    // Add pairs.status
   }
 
   /**
@@ -279,6 +288,8 @@ export class NewPairTradingService {
     // LP must be big enough
     const lpSizeInToken = (p.data as DtPairDynamicData).liquidity;
     const lpSizeUsd = lpSizeInToken; // TODO: Check it
+    console.log('{tryPlaceEntry} lpSizeUsd: ', lpSizeUsd);
+    return;
 
     const tradingDirectiveAutoConfig = await this.prisma.tradingDirectiveAutoConfig.findFirst();
     if (tradingDirectiveAutoConfig === null) {
@@ -291,9 +302,6 @@ export class NewPairTradingService {
       this.logger.warn('SKIP: LP is not big enough: ' + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`);
       return;
     }
-
-    console.log('{tryPlaceEntry} STOP here: ');
-    return;
 
     // get realtime quote
     // TODO:

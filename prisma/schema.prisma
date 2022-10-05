@@ -46,6 +46,7 @@ model Chain {
 model Pair {
   // id = (base quote chain_id broker_id)
   id                    String @id
+  on_chain_id           String
 
   base                  String
   quote                 String
@@ -78,14 +79,14 @@ model PairDynamicData {
   pair_id         String       @id
 
   // Copy from inside of Pair.data
-  initialReserve0 Float
-  initialReserve1 Float
-  initialLiquidity Float
-  initialLiquidityUpdatedAt DateTime
-  liquidity Float
-  reserve0 Float
-  reserve1 Float
-  reserveUpdatedAt DateTime
+  initialReserve0 Float?
+  initialReserve1 Float?
+  initialLiquidity Float?
+  initialLiquidityUpdatedAt DateTime?
+  liquidity Float?
+  reserve0 Float?
+  reserve1 Float?
+  reserveUpdatedAt DateTime?
 
   created_at DateTime   @default(now())
   updated_at DateTime   @updatedAt

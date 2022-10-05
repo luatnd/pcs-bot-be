@@ -62,12 +62,14 @@ export class WSService {
       this.onMessage(message);
     });
 
+    // eslint-disable-next-line no-unused-vars
     this.ws.on('error', (message) => {
       this.logger.debug('{WSService.init} error');
       this.ws.close();
       clearTimeout(this.closeTimeout);
     });
 
+    // eslint-disable-next-line no-unused-vars
     this.ws.on('close', (ev) => {
       this.logger.debug('{WSService.init} close');
       this.opt.onClose && this.opt.onClose();

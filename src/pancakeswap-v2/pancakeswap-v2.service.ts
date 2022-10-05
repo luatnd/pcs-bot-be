@@ -1,9 +1,8 @@
 import * as fs from 'fs';
 import { Injectable, Logger } from '@nestjs/common';
-import { ChainId, Fetcher, Pair, Percent, Route, Token, TokenAmount, Trade, TradeType, WETH } from '@pancakeswap/sdk';
+import { ChainId, Fetcher, Pair, Percent, Route, Token, TokenAmount, Trade, TradeType } from '@pancakeswap/sdk';
 import { Contract, ethers, Wallet } from 'ethers';
 import { ConfigService } from '@nestjs/config';
-import { ContractAddress } from '../pair-info/type/dextool';
 import EthersServer from '../blockchain/_utils/EthersServer';
 import { AppError } from '../../libs/errors/base.error';
 

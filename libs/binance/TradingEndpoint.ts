@@ -13,6 +13,7 @@ export interface TradingEndpoint {
   /**
    * Create new order
    */
+  // eslint-disable-next-line no-unused-vars
   order: (order: OrderInput, dry_run: boolean) => Promise<OrderResponse | EndpointError>;
 }
 

@@ -10,6 +10,7 @@ import { PrismaErrorCode } from '../prisma/const';
 export class PairInfoService {
   private readonly logger = new Logger(PairInfoService.name);
 
+  // eslint-disable-next-line no-unused-vars
   constructor(private prisma: PrismaService, private eventEmitter: EventEmitter2) {}
 
   getPairId(p: PairCreateInput) {

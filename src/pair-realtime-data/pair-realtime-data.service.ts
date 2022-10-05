@@ -4,7 +4,7 @@ import * as LRUCache from 'lru-cache';
 import { ChainId } from '@pancakeswap/sdk';
 import { CommonBscSymbol } from './const/CommonBSCSymbol';
 import BinanceTradingEndpoint from '../../libs/binance/BinanceTradingEndpoint';
-import { retryUntil, sleep } from '../utils/time';
+import { retryUntil } from '../utils/time';
 import { AppError } from '../../libs/errors/base.error';
 
 @Injectable()

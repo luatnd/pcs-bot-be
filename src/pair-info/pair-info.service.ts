@@ -68,6 +68,11 @@ export class PairInfoService {
     //
   }
 
+  // @Event: new BNB price
+  onNativeCurrencyPriceUpdated(priceUsd: number) {
+    this.eventEmitter.emit('nativeCurrency.price', priceUsd);
+  }
+
   // @Event: Pool created to db
   async onPoolCreated(pair: PairCreateInput) {
     // this.logger.log('OK {onPoolCreated} : ' + pair.id);

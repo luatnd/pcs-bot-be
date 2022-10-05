@@ -3,7 +3,7 @@ import * as throttle from 'lodash.throttle';
 import * as LRUCache from 'lru-cache';
 import { WSService } from '../../libs/socket-client/socket-client.service';
 import { AppError } from '../../libs/errors/base.error';
-import { DtPair, DTResponseType } from './type/dextool';
+import { DtPair, DTResponseType, NativeCurrencyPriceEventDataType, PairEventDataType } from './type/dextool';
 import { PairInfoService } from './pair-info.service';
 
 @Injectable()
@@ -79,6 +79,18 @@ export class PairInfoServiceAuto implements OnModuleInit {
         params: { chain: 'bsc', channel: 'bsc:pools' },
         id: 2,
       };
+
+      // OR just subscribe a pair only
+      // {
+      //   "jsonrpc": "2.0",
+      //   "method": "subscribe",
+      //   "params": {
+      //     "chain": "bsc",
+      //     "channel": "bsc:pair:0x2fa22acdb65ce9763d927656909f14e4e66b5f08"
+      //   },
+      //   "id": 2
+      // }
+
       this.ws.sendObject(pairSubscribeMsg);
     } else {
       // retry after 5s max 10 times
@@ -108,12 +120,16 @@ export class PairInfoServiceAuto implements OnModuleInit {
         return;
       }
 
-      if (msg.result.data.event === 'update' && msg.result.status === 'ok') {
-        const isPairCreationEvent = 'pair' in msg.result.data;
-        if (isPairCreationEvent) {
+      const data = msg.result.data as PairEventDataType;
+      if (data.event === 'update' && msg.result.status === 'ok') {
+        const isPairEvent = 'pair' in data;
+        if (isPairEvent) {
           // This is non-blocking
-          this.handlePairEvent(msg.result.data.pair);
+          this.handlePairEvent(data.pair);
         }
+      } else if (msg.result.status === 'ok' && 'ethPriceUsd' in (msg.result.data as NativeCurrencyPriceEventDataType)) {
+        const prices = msg.result.data as NativeCurrencyPriceEventDataType;
+        this.handleNativeCurrencyPrice(prices);
       }
     }
   }
@@ -134,6 +150,10 @@ export class PairInfoServiceAuto implements OnModuleInit {
 
     this.logger.debug('{handlePairEvent} : ' + this.pairInfoService.getPairName(pair));
     this.updateOrCreateWithThrottle(pair);
+  }
+
+  handleNativeCurrencyPrice(data: NativeCurrencyPriceEventDataType) {
+    this.pairInfoService.onNativeCurrencyPriceUpdated(data.ethPriceUsd);
   }
 
   /**

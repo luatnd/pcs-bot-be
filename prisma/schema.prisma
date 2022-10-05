@@ -130,9 +130,9 @@ model TradingIntend {
   id                  Int       @id @default(autoincrement())
   pair_id             String
   type                TradingIntendType
-  entry               Decimal @db.Decimal(24,12)
-  tp                  Decimal @db.Decimal(24,12)
-  sl                  Decimal @db.Decimal(24,12)
+  entry               Decimal? @db.Decimal(24,12)
+  tp                  Decimal? @db.Decimal(24,12)
+  sl                  Decimal? @db.Decimal(24,12)
   status              TradingIntendStatus
 
   created_at DateTime   @default(now())

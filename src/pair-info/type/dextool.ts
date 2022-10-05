@@ -6,10 +6,17 @@ export type DTResponseType = {
 
 export type ResponseResultType = {
   status: string;
-  data: {
-    event: string;
-    pair: DtPair;
-  };
+  data: PairEventDataType | NativeCurrencyPriceEventDataType;
+};
+
+export type PairEventDataType = {
+  event: string;
+  pair: DtPair;
+};
+
+export type NativeCurrencyPriceEventDataType = {
+  ethPriceUsd: number;
+  ethTimestampUsd: number;
 };
 
 export enum DtExchange {

@@ -11,6 +11,7 @@ import { PancakeswapV2Service } from '../pancakeswap-v2/pancakeswap-v2.service';
 import { PairDynamicDataCreateInput } from '../prisma/@generated/graphql/pair-dynamic-data/pair-dynamic-data-create.input';
 import { PrismaErrorCode } from '../prisma/const';
 import { TradingIntend } from '../prisma/@generated/graphql/trading-intend/trading-intend.model';
+import { Pair } from '../prisma/@generated/graphql/pair/pair.model';
 
 type PairId = string;
 
@@ -52,7 +53,10 @@ export class NewPairTradingService {
       reserve1: d.reserve1,
       reserveUpdatedAt: d.reserveUpdatedAt,
     };
-    const r = await this.prisma.pairDynamicData.create({
+
+    // throw then exit => Stop setup if pair already exist
+    // const r =
+    await this.prisma.pairDynamicData.create({
       data: pairDynamicDataRecord,
     });
 
@@ -187,6 +191,17 @@ export class NewPairTradingService {
   }
 
   async createTradingIntend(p: PairCreateInput) {
+    const existIntend = this.prisma.tradingIntend.findFirst({
+      where: {
+        pair_id: p.id,
+        status: TradingIntendStatus.FindingEntry,
+      },
+    });
+    if (existIntend !== null) {
+      this.logger.warn('{createTradingIntend} Skip creation: TradingIntend FindingEntry already exist for: ' + p.id);
+      return existIntend;
+    }
+
     const tradingIntend: TradingIntendCreateInput = {
       pair_id: p.id,
       type: TradingIntendType.Auto,
@@ -202,15 +217,23 @@ export class NewPairTradingService {
     return this.activeTradingPairs.has(pairId);
   }
 
+  setActiveTradingPair(pairId: string, active: boolean) {
+    if (active) {
+      this.activeTradingPairs.set(pairId, true);
+    } else {
+      this.activeTradingPairs.delete(pairId);
+    }
+  }
+
   setupPriceTracking(p: PairCreateInput) {
     // all intend with TradingIntendStatus=FindingEntry/FindingExit are needed to track price
     // Add this to active trading pair cache
-    this.activeTradingPairs.set(p.id, true);
+    this.setActiveTradingPair(p.id, true);
   }
 
   removePriceTracking(p: PairCreateInput) {
     // Remove this from active trading pair cache
-    this.activeTradingPairs.delete(p.id);
+    this.setActiveTradingPair(p.id, false);
   }
 
   async tryPlaceEntry(p: PairCreateInput, tradingIntent?: TradingIntend) {
@@ -219,6 +242,7 @@ export class NewPairTradingService {
       return;
     }
 
+    // Only place entry for: status = FindingEntry
     if (!tradingIntent) {
       try {
         tradingIntent = await this.prisma.tradingIntend.findFirst({
@@ -227,36 +251,62 @@ export class NewPairTradingService {
             status: TradingIntendStatus.FindingEntry,
           },
         });
+
+        // null = not found
+        if (!tradingIntent) {
+          this.logger.warn('{tryPlaceEntry} SKIP: Cannot find tradingIntent FindingEntry pair for: ' + p.id);
+          return;
+        }
       } catch (e) {
         this.logger.error('{tryPlaceEntry} e.code: ' + e.code, e); // TODO: comment out this log
-        this.logger.warn('{tryPlaceEntry} Cannot find FindingEntry pair for: ' + p.id);
+        this.logger.warn('{tryPlaceEntry} SKIP: Cannot find tradingIntent FindingEntry pair for: ' + p.id);
         return;
       }
     }
 
+    if (tradingIntent.status != TradingIntendStatus.FindingEntry) {
+      // eslint-disable-next-line max-len
+      this.logger.warn(
+        '{tryPlaceEntry} SKIP: tradingIntent.status != FindingEntry: ' + p.id + ' ' + tradingIntent.status,
+      );
+      return;
+    }
+
+    // LP must be big enough
     const lpSizeInToken = (p.data as DtPairDynamicData).liquidity;
     const lpSizeUsd = lpSizeInToken; // TODO: Check it
-    let minLpSizeUsd = 0;
-    try {
-      const tradingDirectiveAutoConfig = await this.prisma.tradingDirectiveAutoConfig.findFirst();
-      minLpSizeUsd = tradingDirectiveAutoConfig.pair_budget_usd.toNumber();
-    } catch (e) {
-      this.logger.error(e.code, e);
+
+    const tradingDirectiveAutoConfig = await this.prisma.tradingDirectiveAutoConfig.findFirst();
+    if (tradingDirectiveAutoConfig === null) {
+      this.logger.error('SKIP: tradingDirectiveAutoConfig not exist');
+      return;
     }
+    const minLpSizeUsd = tradingDirectiveAutoConfig.pair_budget_usd.toNumber();
+
     if (lpSizeUsd < minLpSizeUsd) {
       this.logger.warn('SKIP: LP is not big enough: ' + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`);
       return;
     }
 
+    console.log('{tryPlaceEntry} STOP here: ');
+    return;
+
     // get realtime quote
     // TODO:
-    const quotes = await this.pancakeswapV2Service.getQuotes(null, null, null);
-    const currentPrice = 0;
-    const priceImpact = 0;
+    const base = null;
+    const quote = null;
+    const amount = null; // amount in token
+    const MIN_PRICE_IMPACT = 10 / 100;
+    const slippageTolerant = Math.floor(MIN_PRICE_IMPACT * 10000).toString(); // denominator is 10k in PcsV2 service
+    const quotes = await this.pancakeswapV2Service.getQuotation(base, quote, amount, slippageTolerant);
+
+    console.log('{NewPairTradingService.tryPlaceEntry} quotes: ', quotes);
+
+    const currentPrice = Number(quotes.executionPrice);
+    const priceImpact = Number(quotes.priceImpact);
     const initialListingPrice = 1;
     // END: TODO
 
-    const MIN_PRICE_IMPACT = 10 / 100;
     const MIN_PRICE_DELTA_FOLD = 5;
     // current_price/initial_listing_price <= 5
     if (currentPrice / initialListingPrice > MIN_PRICE_DELTA_FOLD) {
@@ -275,7 +325,12 @@ export class NewPairTradingService {
     // TODO:
     const MAX_VOL_PERCENT_BASE_ON_LP = 5;
     const tradingVol = (lpSizeInToken * MAX_VOL_PERCENT_BASE_ON_LP) / 100;
-    const swapResult = await this.pancakeswapV2Service.swap(); // TODO:
+    const swapResult = await this.pancakeswapV2Service.swapExactETHForTokenWithTradeObject(
+      quotes.trade,
+      quotes.minimumAmountOut,
+      base,
+      quote,
+    );
 
     // TODO:
     const createEntrySucceed = false;
@@ -306,5 +361,9 @@ export class NewPairTradingService {
     this.removePriceTracking(p);
 
     // TODO:
+  }
+
+  async getPairById(pairId: string): Promise<Pair> {
+    return this.prisma.pair.findUnique({ where: { id: pairId } });
   }
 }

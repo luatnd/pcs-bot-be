@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { Injectable, Logger } from '@nestjs/common';
-import { ChainId, Fetcher, Percent, Route, Token, TokenAmount, Trade, TradeType, WETH } from '@pancakeswap/sdk';
+import { ChainId, Fetcher, Pair, Percent, Route, Token, TokenAmount, Trade, TradeType, WETH } from '@pancakeswap/sdk';
 import { Contract, ethers, Wallet } from 'ethers';
 import { ConfigService } from '@nestjs/config';
 import { ContractAddress } from '../pair-info/type/dextool';
@@ -33,16 +33,23 @@ export class PancakeswapV2Service {
     this.wallet = this.getAppWallet();
   }
 
-  async getQuotes(base: Token, quote: Token, amount: string, slippage = '50') {
+  async getQuotation(base: Token, quote: Token, amountInToken: string, slippage = '50') {
     const provider = this.provider;
 
-    const pair = await Fetcher.fetchPairData(base, quote, provider); //creating instances of a pair
+    const pair: Pair = await Fetcher.fetchPairData(base, quote, provider); //creating instances of a pair
     const route = await new Route([pair], base); // a fully specified path from input token to output token
     // console.log('{swapExactETHForToken} route: ', route);
     // console.log('{swapExactETHForToken} route.pairs: ', JSON.stringify(route.pairs[0]));
     // console.log('{swapExactETHForToken} mid_price: ', route.midPrice.toSignificant()); // 1 base = ? quote
+    // console.log('{getQuotation} pair: ', pair);
 
-    const amountInBN = ethers.utils.parseEther(amount.toString()); //helper function to convert ETH to Wei
+    const pooledTokenAmountBase = pair.reserve0.toSignificant();
+    const pooledTokenAmountQuote = pair.reserve1.toSignificant();
+    const baseToQuotePrice = pair.token0Price.toSignificant(); // 1 base = ? quote
+    const quoteToBasePrice = pair.token1Price.toSignificant(); // 1 quote = ? base
+    // const totalLpUsd = pooledTokenAmountBase * basePriceUsd + pooledTokenAmountQuote * quotePriceUsd;
+
+    const amountInBN = ethers.utils.parseEther(amountInToken.toString()); //helper function to convert ETH to Wei
     const amountIn = amountInBN.toString();
 
     const slippageTolerance = new Percent(slippage, '10000'); // 50 bips, or 0.50% - Slippage tolerance
@@ -68,16 +75,26 @@ export class PancakeswapV2Service {
 
     return {
       trade,
+
       midPrice: route.midPrice,
       executionPrice: trade.executionPrice,
       nextMidPrice: trade.nextMidPrice,
       priceImpact: trade.priceImpact,
       minimumAmountOut,
+
+      // number of token amount of base in LP
+      pooledTokenAmountBase,
+      // number of token amount of quote in LP
+      pooledTokenAmountQuote,
+      // 1 base = x quote
+      baseToQuotePrice,
+      // 1 quote = x base
+      quoteToBasePrice,
     };
   }
 
   async swapUnsafe(base: Token, quote: Token, amount: string, slippage = '50') {
-    const { trade, minimumAmountOut } = await this.getQuotes(base, quote, amount, slippage);
+    const { trade, minimumAmountOut } = await this.getQuotation(base, quote, amount, slippage);
     return this.swapExactETHForTokenWithTradeObject(trade, minimumAmountOut, base, quote);
   }
 
@@ -165,8 +182,8 @@ export class PancakeswapV2Service {
     return new Token(chainId, address, decimal, symbol);
   }
 
-  getAppToken(address: string, decimal: number, symbol?: string): Token {
-    return new Token(this.getChainId(), address, decimal, symbol);
+  getAppToken(address: string, decimal: number, symbol?: string, name?: string): Token {
+    return new Token(this.getChainId(), address, decimal, symbol, name);
   }
 
   getAppProvider(): ethers.providers.BaseProvider {

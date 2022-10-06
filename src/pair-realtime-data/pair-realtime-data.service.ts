@@ -38,7 +38,7 @@ export class PairRealtimeDataService {
   }
 
   // Support BSC only
-  async getSymbolPriceUsd(symbol: string, chainId: number, address?: string): Promise<number | undefined> {
+  async getSymbolPriceUsd(symbol: string, chainId: number, address?: string): Promise<number | null> {
     symbol = symbol.toUpperCase();
 
     if (this.isKnownStableCoin(symbol, address)) {
@@ -57,7 +57,7 @@ export class PairRealtimeDataService {
       this.symbolPriceUsdCache.set(k, priceUsd);
       return priceUsd;
     } catch (e) {
-      return undefined;
+      return null;
     }
   }
 

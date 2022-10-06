@@ -5,13 +5,18 @@ import { PairCreateInput } from '../prisma/@generated/graphql/pair/pair-create.i
 import { TradingIntendStatus } from '../prisma/@generated/graphql/prisma/trading-intend-status.enum';
 import { TradingIntendCreateInput } from '../prisma/@generated/graphql/trading-intend/trading-intend-create.input';
 import { TradingIntendType } from '../prisma/@generated/graphql/prisma/trading-intend-type.enum';
-import { DtExchange, DtPairDynamicData } from '../pair-info/type/dextool';
+import { DtExchange, DtPair, DtPairDynamicData } from '../pair-info/type/dextool';
 import { PancakeswapV2Service } from '../pancakeswap-v2/pancakeswap-v2.service';
 // eslint-disable-next-line max-len
 import { PairDynamicDataCreateInput } from '../prisma/@generated/graphql/pair-dynamic-data/pair-dynamic-data-create.input';
 import { PrismaErrorCode } from '../prisma/const';
 import { TradingIntend } from '../prisma/@generated/graphql/trading-intend/trading-intend.model';
 import { Pair } from '../prisma/@generated/graphql/pair/pair.model';
+import { AppError } from '../../libs/errors/base.error';
+import { CommonBscQuoteSymbol } from '../pair-realtime-data/const/CommonBSCSymbol';
+// eslint-disable-next-line max-len
+import { TradingDirectiveAutoConfig } from '../prisma/@generated/graphql/trading-directive-auto-config/trading-directive-auto-config.model';
+import { PairRealtimeDataService } from '../pair-realtime-data/pair-realtime-data.service';
 
 type PairId = string;
 
@@ -26,6 +31,7 @@ export class NewPairTradingService {
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
     private pancakeswapV2Service: PancakeswapV2Service,
+    private pairRealtimeDataService: PairRealtimeDataService,
   ) {}
 
   @OnEvent('lp.created', { async: true })
@@ -245,102 +251,149 @@ export class NewPairTradingService {
     this.setActiveTradingPair(p.id, false);
   }
 
+  /**
+   * @NOTE:
+   *
+   *  RULE:
+   *    The pair is XXX/BUSD => base = XXX, quote = BUSD
+   *    The pair is BUSD/XXX => base = BUSD, quote = XXX
+   *                         => Will be swap to: base = XXX, quote = BUSD
+   *
+   *  We alway consider XXX is the project we want to buy, it's always `base`,
+   *                    BUSD is the token we're holding & want to sell, it's `quote`
+   *
+   * @NOTE:
+   *  BUY mean we trade `quote` to get `base` => give BUSD and get XXX
+   *  SELL mean we trade `base` to get `quote` => give XXX and get BUSD
+   */
   async tryPlaceEntry(p: PairCreateInput, tradingIntent?: TradingIntend) {
     if (!this.isActiveTradingPair(p.id)) {
-      console.log('{tryPlaceEntry} test: ');
       this.logger.debug('Not isActiveTradingPair: ' + p.id);
-      throw new Error('ASFASF');
       return;
     }
 
     // Only place entry for: status = FindingEntry
-    if (!tradingIntent) {
-      try {
-        tradingIntent = await this.prisma.tradingIntend.findFirst({
-          where: {
-            pair_id: p.id,
-            status: TradingIntendStatus.FindingEntry,
-          },
-        });
-
-        // null = not found
-        if (!tradingIntent) {
-          this.logger.warn('{tryPlaceEntry} SKIP: Cannot find tradingIntent FindingEntry pair for: ' + p.id);
-          return;
-        }
-      } catch (e) {
-        // this.logger.error('{tryPlaceEntry} e.code: ' + e.code, e);
-        this.logger.warn(
-          '{tryPlaceEntry} SKIP: Cannot find tradingIntent FindingEntry pair for: ' + p.id + ' with error:',
-          e.code,
-          e,
-        );
-        return;
-      }
-    }
-
-    if (tradingIntent.status != TradingIntendStatus.FindingEntry) {
-      // eslint-disable-next-line max-len
-      this.logger.warn(
-        '{tryPlaceEntry} SKIP: tradingIntent.status != FindingEntry: ' + p.id + ' ' + tradingIntent.status,
-      );
+    try {
+      tradingIntent = await this.validateTradingIntend(p, tradingIntent);
+    } catch (e) {
+      this.logger.error('{tryPlaceEntry.validateTradingIntend} e.code: ' + e.code, e);
       return;
     }
 
     // LP must be big enough
-    const lpSizeInToken = (p.data as DtPairDynamicData).liquidity;
-    const lpSizeUsd = lpSizeInToken; // TODO: Check it
-    console.log('{tryPlaceEntry}2 lpSizeUsd: ', lpSizeUsd);
-    this.logger.log('{tryPlaceEntry}1 lpSizeUsd: ', lpSizeUsd);
-    throw new Error('STOP');
-    return;
-
-    const tradingDirectiveAutoConfig = await this.prisma.tradingDirectiveAutoConfig.findFirst();
-    if (tradingDirectiveAutoConfig === null) {
-      this.logger.error('SKIP: tradingDirectiveAutoConfig not exist');
+    let lpInfo: {
+      tradingDirectiveAutoConfig: TradingDirectiveAutoConfig;
+      lpSizeUsd: number;
+      minLpSizeUsd: number;
+    };
+    try {
+      lpInfo = await this.validateLpSize(p);
+    } catch (e) {
+      this.logger.error('{tryPlaceEntry.validateLpSize} e.code: ' + e.code, e);
       return;
     }
-    const minLpSizeUsd = tradingDirectiveAutoConfig.pair_budget_usd.toNumber();
+    const { tradingDirectiveAutoConfig, lpSizeUsd, minLpSizeUsd } = lpInfo;
 
-    if (lpSizeUsd < minLpSizeUsd) {
-      this.logger.warn('SKIP: LP is not big enough: ' + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`);
+    // ---- get realtime quote -----
+    const pData = p.data as DtPair;
+    const { baseSortedIdx: bi, quoteSortedIdx: qi } = this.getSortedIdx(pData);
+
+    const baseTokenData = pData['token' + bi]; // Can be token0 or token1
+    const quoteTokenData = pData['token' + qi]; // Can be token0 or token1
+    const baseReserve = pData['reserve' + bi];
+    const quoteReserve = pData['reserve' + qi];
+    // const baseInitialReserve = pData.initialReserve0;
+    // const quoteInitialReserve = pData.initialReserve1;
+
+    // eslint-disable-next-line max-len
+    const base = this.pancakeswapV2Service.getAppToken(
+      baseTokenData.id,
+      baseTokenData.decimals,
+      baseTokenData.symbol,
+      baseTokenData.name,
+    );
+    // eslint-disable-next-line max-len
+    const quote = this.pancakeswapV2Service.getAppToken(
+      quoteTokenData.id,
+      quoteTokenData.decimals,
+      quoteTokenData.symbol,
+      quoteTokenData.name,
+    );
+
+    let attemptTradingVolInToken = 0;
+    try {
+      attemptTradingVolInToken = await this.chooseTradingVol(
+        tradingDirectiveAutoConfig,
+        quoteTokenData,
+        baseReserve,
+        quoteReserve,
+        lpSizeUsd,
+      );
+    } catch (e) {
+      this.logger.error('{tryPlaceEntry} Cannot choose trading vol: code, message, e: ' + e.code + ' ' + e.message, e);
       return;
     }
 
-    // get realtime quote
-    // TODO:
-    const base = null;
-    const quote = null;
-    const amount = null; // amount in token
+    // amountInToken in token, force min(5% LP, $500) to get quotes
+    const amountInToken = attemptTradingVolInToken;
     const MIN_PRICE_IMPACT = 10 / 100;
     const slippageTolerant = Math.floor(MIN_PRICE_IMPACT * 10000).toString(); // denominator is 10k in PcsV2 service
-    const quotes = await this.pancakeswapV2Service.getQuotation(base, quote, amount, slippageTolerant);
+    const quotes = await this.pancakeswapV2Service.getQuotation(
+      base,
+      quote,
+      amountInToken.toString(),
+      slippageTolerant,
+    );
+    this.logger.log('{tryPlaceEntry} quotes: ', {
+      trade: '... => Complex object',
+      midPrice: quotes.midPrice.toSignificant(),
+      executionPrice: quotes.executionPrice.toSignificant(),
+      nextMidPrice: quotes.nextMidPrice.toSignificant(),
+      priceImpact: quotes.priceImpact.toSignificant(),
+      minimumAmountOut: quotes.minimumAmountOut,
+      // number of token amount of base in LP
+      pooledTokenAmount0: quotes.pooledTokenAmount0,
+      // number of token amount of quote in LP
+      pooledTokenAmount1: quotes.pooledTokenAmount1,
+      // 1 base = x quote
+      token0Price: quotes.token0Price,
+      // 1 quote = x base
+      token1Price: quotes.token1Price,
+    });
 
-    console.log('{NewPairTradingService.tryPlaceEntry} quotes: ', quotes);
-
-    const currentPrice = Number(quotes.executionPrice);
-    const priceImpact = Number(quotes.priceImpact);
-    const initialListingPrice = 1;
-    // END: TODO
+    const currentPrice = Number(quotes.executionPrice.toSignificant());
+    const midPrice = Number(quotes.midPrice.toSignificant());
+    const nextMidPrice = Number(quotes.nextMidPrice.toSignificant());
+    const priceImpactPercent = Number(quotes.priceImpact.toSignificant());
 
     const MIN_PRICE_DELTA_FOLD = 5;
-    // current_price/initial_listing_price <= 5
-    if (currentPrice / initialListingPrice > MIN_PRICE_DELTA_FOLD) {
-      this.logger.warn(
-        `SKIP: because of price go to far: currentPrice=${currentPrice} initialListingPrice=${initialListingPrice}`,
-      );
-      return;
-    }
+
+    // const initialListingPrice = 1;
+    // // current_price/initial_listing_price <= 5
+    // if (currentPrice / initialListingPrice > MIN_PRICE_DELTA_FOLD) {
+    //   this.logger.warn(
+    //     `SKIP: because of price go to far: currentPrice=${currentPrice} initialListingPrice=${initialListingPrice}`,
+    //   );
+    //   return;
+    // }
+    console.log('{tryPlaceEntry} priceImpactPercent: ', priceImpactPercent, MIN_PRICE_IMPACT * 100);
+
     // price_impact <= 10%
-    if (priceImpact > MIN_PRICE_IMPACT) {
-      this.logger.warn(`SKIP: because of priceImpact=${priceImpact} larger than ${MIN_PRICE_DELTA_FOLD * 100}%`);
+    if (priceImpactPercent > MIN_PRICE_IMPACT * 100) {
+      this.logger.warn(`SKIP: because of priceImpact=${priceImpactPercent} larger than ${MIN_PRICE_IMPACT * 100}%`);
       return;
     }
+
+    console.log('{tryPlaceEntry} stop here: ');
+    return;
 
     // if all cond met => Create order:
     // TODO:
     const MAX_VOL_PERCENT_BASE_ON_LP = 5;
-    const tradingVol = (lpSizeInToken * MAX_VOL_PERCENT_BASE_ON_LP) / 100;
+    const lpSizeInToken = Number(quotes.pooledTokenAmount0);
+    // const tradingVolInToken = (lpSizeInToken * MAX_VOL_PERCENT_BASE_ON_LP) / 100;
+    const tokenPriceUsd = 0; // TODO
+    // const tradingVolInUsd = tradingVolInToken * tokenPriceUsd;
     const swapResult = await this.pancakeswapV2Service.swapExactETHForTokenWithTradeObject(
       quotes.trade,
       quotes.minimumAmountOut,
@@ -354,6 +407,167 @@ export class NewPairTradingService {
       this.setupTP(p);
       this.setupSL(p);
     }
+  }
+
+  /**
+   * Determine the index of the project token is base token,
+   *  and the quote token must be popular token like: BUSD, BNB, USDT
+   *
+   * For more detail check the Solidity code:
+   *   function sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {}
+   */
+  private getSortedIdx(pairData: DtPair): { quoteSortedIdx: number; baseSortedIdx: number } {
+    const pData: DtPair = { ...pairData };
+
+    let baseSortedIdx = 0;
+    let quoteSortedIdx = 1;
+
+    /**
+     * Ensure base token is the token of the project
+     * If base is common quote then swap it
+     */
+    if (pData.token0.symbol.toUpperCase() in CommonBscQuoteSymbol) {
+      this.logger.warn('{getSortedIdx} pair.token0 is known common quote symbol');
+      baseSortedIdx = 1;
+      quoteSortedIdx = 0;
+    } else if (pData.token1.symbol.toUpperCase() in CommonBscQuoteSymbol) {
+      this.logger.warn('{getSortedIdx} pair.token1 is known common quote symbol');
+    } else {
+      this.logger.warn('{getSortedIdx} Quote token is not known common quote symbol');
+    }
+
+    // TODO: Handle the case we don't have any quote balance,
+    //    eg: we wanna trade HERO/USDT but no USDT left
+
+    return {
+      baseSortedIdx,
+      quoteSortedIdx,
+    };
+  }
+
+  private async validateTradingIntend(p: PairCreateInput, tradingIntent?: TradingIntend) {
+    if (!tradingIntent) {
+      try {
+        tradingIntent = await this.prisma.tradingIntend.findFirst({
+          where: {
+            pair_id: p.id,
+            status: TradingIntendStatus.FindingEntry,
+          },
+        });
+      } catch (e) {
+        // this.logger.error('{tryPlaceEntry} e.code: ' + e.code, e);
+        this.logger.warn(
+          '{tryPlaceEntry} SKIP: Cannot find tradingIntent FindingEntry pair for: ' + p.id + ' with error:',
+          e.code,
+          e,
+        );
+
+        throw e;
+      }
+    }
+
+    // null = not found
+    if (!tradingIntent) {
+      // this.logger.warn('{tryPlaceEntry} SKIP: Cannot find tradingIntent FindingEntry pair for: ' + p.id);
+      // return;
+      throw new AppError(
+        '{tryPlaceEntry} SKIP: Cannot find tradingIntent FindingEntry pair for: ' + p.id,
+        'TradingIntendStatus.FindingEntry.NotFound',
+      );
+    }
+
+    if (tradingIntent.status != TradingIntendStatus.FindingEntry) {
+      // eslint-disable-next-line max-len
+      // this.logger.warn(
+      //   '{tryPlaceEntry} SKIP: tradingIntent.status != FindingEntry: ' + p.id + ' ' + tradingIntent.status,
+      // );
+      // return;
+      throw new AppError(
+        '{tryPlaceEntry} SKIP: tradingIntent.status != FindingEntry: ' + p.id + ' ' + tradingIntent.status,
+        'TradingIntendStatus.FindingEntry.NotEqual',
+      );
+    }
+
+    return tradingIntent;
+  }
+
+  // LP must be big enough
+  private async validateLpSize(p: PairCreateInput) {
+    const tradingDirectiveAutoConfig = await this.prisma.tradingDirectiveAutoConfig.findFirst();
+    if (tradingDirectiveAutoConfig === null) {
+      // this.logger.error("SKIP: tradingDirectiveAutoConfig not exist");
+      // return;
+      throw new AppError('SKIP: tradingDirectiveAutoConfig not exist', 'MissingDbConfig');
+    }
+    const minPairBudgetInUsd = tradingDirectiveAutoConfig.min_pair_budget_usd.toNumber();
+    // const maxPairBudgetInUsd = tradingDirectiveAutoConfig.max_pair_budget_usd.toNumber();
+    /**
+     * trading vol must be <= 10% of LP <=> So LP must be big enough
+     * safeLpSizeUsd=100k mean sth like if a pair has 100K USD in its LP, it's likely not a rug pool pair
+     */
+    const safeLpSizeUsd = tradingDirectiveAutoConfig.safe_lp_size_usd.toNumber();
+    // eslint-disable-next-line camelcase
+    const minLpSizeUsd_ByMinTrade = (minPairBudgetInUsd / 10) * 100; // Hard code max trade <= 10% of LP
+    const minLpSizeUsd = Math.max(safeLpSizeUsd, minLpSizeUsd_ByMinTrade);
+
+    const lpSizeUsd = (p.data as DtPairDynamicData).liquidity; // or can get LP from router quotation
+    this.logger.debug('{tryPlaceEntry} lpSizeUsd: ' + lpSizeUsd);
+    if (lpSizeUsd < minLpSizeUsd) {
+      // this.logger.warn("SKIP: LP is not big enough: " + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`);
+      // return;
+      throw new AppError(
+        'SKIP: LP is not big enough: ' + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`,
+        'LpTooSmall',
+      );
+    }
+
+    return {
+      tradingDirectiveAutoConfig,
+      lpSizeUsd,
+      minLpSizeUsd,
+    };
+  }
+
+  async chooseTradingVol(
+    tradingDirectiveAutoConfig,
+    quoteTokenData,
+    baseReserve,
+    quoteReserve,
+    lpSizeUsd,
+  ): Promise<number> {
+    const maxPairBudgetInUsd = tradingDirectiveAutoConfig.max_pair_budget_usd.toNumber();
+    const minPairBudgetInUsd = tradingDirectiveAutoConfig.min_pair_budget_usd.toNumber();
+
+    // Cond 1: min_pair_budget_usd <= trading vol must be <= max_pair_budget_usd
+    // Cond 2: trading vol must be <= 5% of Lp size, Eg: trading vol cannot exceed 5% of LP
+    const maxVolPercentOfLp = tradingDirectiveAutoConfig.max_vol_percent_of_lp.toNumber();
+    const maxVolBaseOnLp = (lpSizeUsd * maxVolPercentOfLp) / 100;
+
+    const maxVolInUsd = Math.min(maxPairBudgetInUsd, maxVolBaseOnLp);
+    if (maxVolInUsd < minPairBudgetInUsd) {
+      throw new AppError(
+        `maxVolInUsd < minPairBudgetInUsd: ${maxVolInUsd} < ${minPairBudgetInUsd}`,
+        'MaxVolUsdTooSmall',
+      );
+    }
+
+    // eslint-disable-next-line max-len
+    const quotePriceUsd = await this.pairRealtimeDataService.getSymbolPriceUsd(
+      quoteTokenData.symbol,
+      this.pancakeswapV2Service.getChainId(),
+      quoteTokenData.id,
+    );
+    if (quotePriceUsd === null) {
+      throw new AppError('Cannot get quotePriceUsd from pairRealtimeDataService', 'CannotGetSymbolPrice');
+    }
+    // This is unsafe calculation
+    // normally base value and quote value need to be the same
+    // So quote_token_in_lp * quote_price ~= base_token_in_lp * base_price
+    const estimatedBasePriceUsd = (quoteReserve * quotePriceUsd) / baseReserve;
+
+    const maxVolInToken = maxVolInUsd / estimatedBasePriceUsd; // NOTE: sell `quote` to buy `base`
+
+    return maxVolInToken;
   }
 
   tryTp(p: PairCreateInput) {

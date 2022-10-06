@@ -40,6 +40,14 @@ export type DtPairStaticData = {
     maxSupplyFormatted: number;
     totalSupplyFormatted: number;
     totalSupplyFormattedUpdatedAt: DateStringISO;
+
+    // this field from api
+    fullyDilutedMarketCap?: number;
+    marketCap?: number;
+    remainingSupply?: string;
+    remainingSupplyUpdatedAt?: DateStringISO;
+    fullyDilutedMarketCapFormatted?: number;
+    marketCapFormatted?: number;
   };
   team: {
     wallet: string;
@@ -49,7 +57,7 @@ export type DtPairStaticData = {
   id: string; // contract address ?
   exchange: DtExchange;
   createdAt: DateStringISO;
-  updatedAt: DateUnix;
+  updatedAt: DateUnix | DateStringISO;
   __v: number;
   createdAtBlockNumber: number;
   createdAtTimestamp: DateUnix;
@@ -94,8 +102,8 @@ export type DtOnChainCreation = {
   cumulativeGasUsed: string;
   gasUsed: string;
   confirmations: string;
-  methodId: string;
-  functionName: string;
+  methodId?: string;
+  functionName?: string;
 };
 
 export type DTToken = {

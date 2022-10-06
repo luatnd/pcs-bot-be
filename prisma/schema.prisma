@@ -165,7 +165,13 @@ model TradingDirectiveAutoConfig {
   sl_target                  Decimal @db.Decimal(6,2)
 
   // How many USD you wanna spent for a single pair?
-  pair_budget_usd            Decimal @db.Decimal(6,2)
+  min_pair_budget_usd        Decimal @db.Decimal(8,2)
+  max_pair_budget_usd        Decimal @db.Decimal(8,2)
+
+  // how much USD in LP that this pair is safe to trade?
+  safe_lp_size_usd           Decimal @db.Decimal(10,2)
+  // Eg: trading vol cannot exceed 5% of LP
+  max_vol_percent_of_lp      Decimal @db.Decimal(4,1)
 
   @@map("trading_directive_auto_config")
 }

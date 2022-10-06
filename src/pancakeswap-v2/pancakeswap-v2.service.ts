@@ -33,19 +33,35 @@ export class PancakeswapV2Service {
   }
 
   async getQuotation(base: Token, quote: Token, amountInToken: string, slippage = '50') {
+    this.logger.log(
+      '{getQuotation} base/quote, amount, slippage: ' +
+        `${base.symbol}/${quote.symbol}, ${amountInToken} token, ${Number(
+          new Percent(slippage, '10000').toSignificant(),
+        )}%`,
+    );
     const provider = this.provider;
 
     const pair: Pair = await Fetcher.fetchPairData(base, quote, provider); //creating instances of a pair
-    const route = await new Route([pair], base); // a fully specified path from input token to output token
+
+    /*
+    NOTE:
+    token0 & token1 is in sorted order, not the base / quote as we expect,
+    plz see the Solidity code:
+
+    function sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {
+        require(tokenA != tokenB, 'UniswapV2Library: IDENTICAL_ADDRESSES');
+        (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+        require(token0 != address(0), 'UniswapV2Library: ZERO_ADDRESS');
+    }
+
+     */
+
+    // https://docs.uniswap.org/sdk/2.0.0/reference/trade
+    const route = await new Route([pair], quote); // a fully specified path from input token to output token
     // console.log('{swapExactETHForToken} route: ', route);
     // console.log('{swapExactETHForToken} route.pairs: ', JSON.stringify(route.pairs[0]));
     // console.log('{swapExactETHForToken} mid_price: ', route.midPrice.toSignificant()); // 1 base = ? quote
     // console.log('{getQuotation} pair: ', pair);
-
-    const pooledTokenAmountBase = pair.reserve0.toSignificant();
-    const pooledTokenAmountQuote = pair.reserve1.toSignificant();
-    const baseToQuotePrice = pair.token0Price.toSignificant(); // 1 base = ? quote
-    const quoteToBasePrice = pair.token1Price.toSignificant(); // 1 quote = ? base
     // const totalLpUsd = pooledTokenAmountBase * basePriceUsd + pooledTokenAmountQuote * quotePriceUsd;
 
     const amountInBN = ethers.utils.parseEther(amountInToken.toString()); //helper function to convert ETH to Wei
@@ -53,8 +69,9 @@ export class PancakeswapV2Service {
 
     const slippageTolerance = new Percent(slippage, '10000'); // 50 bips, or 0.50% - Slippage tolerance
 
+    // https://docs.uniswap.org/sdk/2.0.0/reference/trade
     // information necessary to create a swap transaction.
-    const trade = new Trade(route, new TokenAmount(base, amountIn), TradeType.EXACT_INPUT);
+    const trade = new Trade(route, new TokenAmount(quote, amountIn), TradeType.EXACT_INPUT);
 
     // console.log('{swapExactETHForToken} trade: ', trade);
     // console.log('{swapExactETHForToken} trade.executionPrice: ', trade.executionPrice.toSignificant());
@@ -79,16 +96,18 @@ export class PancakeswapV2Service {
       executionPrice: trade.executionPrice,
       nextMidPrice: trade.nextMidPrice,
       priceImpact: trade.priceImpact,
+
+      // Minimum received on PCS UI?
       minimumAmountOut,
 
-      // number of token amount of base in LP
-      pooledTokenAmountBase,
+      // number of token amount of base in LP, called `pooled amount` in dextool.io
+      pooledTokenAmount0: pair.reserve0.toSignificant(),
       // number of token amount of quote in LP
-      pooledTokenAmountQuote,
-      // 1 base = x quote
-      baseToQuotePrice,
-      // 1 quote = x base
-      quoteToBasePrice,
+      pooledTokenAmount1: pair.reserve1.toSignificant(),
+      // 1 token0 = ? token1
+      token0Price: pair.token0Price.toSignificant(),
+      // 1 token1 = ? token0
+      token1Price: pair.token1Price.toSignificant(),
     };
   }
 
@@ -108,6 +127,11 @@ export class PancakeswapV2Service {
     // amount: string,
     // slippage = '50',
   ) {
+    this.logger.log(
+      '{swapExactETHForTokenWithTradeObject} base, quote, minimumAmountOut: ' +
+        `${base.symbol}, ${quote.symbol}, ${minimumAmountOut}`,
+    );
+
     const wallet = this.wallet;
 
     const amountOutMinHex = ethers.BigNumber.from(minimumAmountOut).toHexString();
@@ -127,7 +151,10 @@ export class PancakeswapV2Service {
       path,
       to,
       deadlineInSecs,
-      { value: valueHex },
+      {
+        value: valueHex,
+        // gasPrice: "100000000000" // 100 gwei
+      },
     );
 
     //Returns a Promise which resolves to the transaction.

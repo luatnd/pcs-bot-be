@@ -40,3 +40,5 @@ export const CommonBscSymbol: Record<
     symbolBinance: 'CAKEUSDT',
   },
 };
+
+export const CommonBscQuoteSymbol = CommonBscSymbol;

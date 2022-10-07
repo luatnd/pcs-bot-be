@@ -13,7 +13,7 @@ import { PrismaErrorCode } from '../prisma/const';
 import { TradingIntend } from '../prisma/@generated/graphql/trading-intend/trading-intend.model';
 import { Pair } from '../prisma/@generated/graphql/pair/pair.model';
 import { AppError } from '../../libs/errors/base.error';
-import { CommonBscQuoteSymbol } from '../pair-realtime-data/const/CommonBSCSymbol';
+import { CommonBscQuoteAddress, CommonBscQuoteSymbol } from '../pair-realtime-data/const/CommonBSCSymbol';
 // eslint-disable-next-line max-len
 import { TradingDirectiveAutoConfig } from '../prisma/@generated/graphql/trading-directive-auto-config/trading-directive-auto-config.model';
 import { PairRealtimeDataService } from '../pair-realtime-data/pair-realtime-data.service';
@@ -124,7 +124,7 @@ export class NewPairTradingService {
 
       // try place entry if status = FindingEntry
       if (!!tradingIntent) {
-        await this.tryPlaceEntry(payload);
+        await this.tryPlaceBuyEntry(payload);
       }
     } catch (e) {}
 
@@ -166,7 +166,7 @@ export class NewPairTradingService {
       },
     });
 
-    await this.tryPlaceEntry(payload);
+    await this.tryPlaceBuyEntry(payload);
     await this.tryTp(payload);
     await this.trySl(payload);
   }
@@ -202,7 +202,7 @@ export class NewPairTradingService {
     //  - setup TP
     await this.createTradingIntend(p);
     await this.setupPriceTracking(p);
-    await this.tryPlaceEntry(p);
+    await this.tryPlaceBuyEntry(p);
   }
 
   async createTradingIntend(p: PairCreateInput) {
@@ -260,13 +260,13 @@ export class NewPairTradingService {
    *                         => Will be swap to: base = XXX, quote = BUSD
    *
    *  We alway consider XXX is the project we want to buy, it's always `base`,
-   *                    BUSD is the token we're holding & want to sell, it's `quote`
+   *                    BUSD is the common token we're holding & want to sell, it's `quote`
    *
    * @NOTE:
    *  BUY mean we trade `quote` to get `base` => give BUSD and get XXX
    *  SELL mean we trade `base` to get `quote` => give XXX and get BUSD
    */
-  async tryPlaceEntry(p: PairCreateInput, tradingIntent?: TradingIntend) {
+  async tryPlaceBuyEntry(p: PairCreateInput, tradingIntent?: TradingIntend) {
     if (!this.isActiveTradingPair(p.id)) {
       this.logger.debug('Not isActiveTradingPair: ' + p.id);
       return;
@@ -304,6 +304,7 @@ export class NewPairTradingService {
     const quoteReserve = pData['reserve' + qi];
     // const baseInitialReserve = pData.initialReserve0;
     // const quoteInitialReserve = pData.initialReserve1;
+    console.log('{tryPlaceBuyEntry} [bi, qi]: ', [bi, qi]);
 
     // eslint-disable-next-line max-len
     const base = this.pancakeswapV2Service.getAppToken(
@@ -320,9 +321,11 @@ export class NewPairTradingService {
       quoteTokenData.name,
     );
 
-    let attemptTradingVolInToken = 0;
+    // This volumn is for get quotes only, we will not trade using this vol
+    let amountOfOwningTokenWeAttemptToSell = 0;
     try {
-      attemptTradingVolInToken = await this.chooseTradingVol(
+      // we're going to buy Base, sell quote token, mean swap [quote => base]
+      amountOfOwningTokenWeAttemptToSell = await this.maxPossibleTradingVol(
         tradingDirectiveAutoConfig,
         quoteTokenData,
         baseReserve,
@@ -330,18 +333,20 @@ export class NewPairTradingService {
         lpSizeUsd,
       );
     } catch (e) {
-      this.logger.error('{tryPlaceEntry} Cannot choose trading vol: code, message, e: ' + e.code + ' ' + e.message, e);
+      this.logger.error('{tryPlaceEntry} Cannot choose trading vol: code, message, e: ' + e.code + ' ' + e.message);
+      this.logger.error(e); // This is how to log to file logger
+      console.error(e); // This is only way to log this error to console
       return;
     }
 
-    // amountInToken in token, force min(5% LP, $500) to get quotes
-    const amountInToken = attemptTradingVolInToken;
+    // quoteTokenAmountToSell in token, force min(5% LP, $500) to get quotes
+    const quoteTokenAmountToSell = amountOfOwningTokenWeAttemptToSell;
     const MIN_PRICE_IMPACT = 10 / 100;
     const slippageTolerant = Math.floor(MIN_PRICE_IMPACT * 10000).toString(); // denominator is 10k in PcsV2 service
     const quotes = await this.pancakeswapV2Service.getQuotation(
       base,
       quote,
-      amountInToken.toString(),
+      quoteTokenAmountToSell.toString(),
       slippageTolerant,
     );
     this.logger.log('{tryPlaceEntry} quotes: ', {
@@ -401,6 +406,9 @@ export class NewPairTradingService {
       quote,
     );
 
+    // TODO: Handle the case we don't have any quote balance,
+    //    eg: we wanna trade HERO/USDT but no USDT left
+
     // TODO:
     const createEntrySucceed = false;
     if (createEntrySucceed) {
@@ -412,9 +420,6 @@ export class NewPairTradingService {
   /**
    * Determine the index of the project token is base token,
    *  and the quote token must be popular token like: BUSD, BNB, USDT
-   *
-   * For more detail check the Solidity code:
-   *   function sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {}
    */
   private getSortedIdx(pairData: DtPair): { quoteSortedIdx: number; baseSortedIdx: number } {
     const pData: DtPair = { ...pairData };
@@ -426,11 +431,11 @@ export class NewPairTradingService {
      * Ensure base token is the token of the project
      * If base is common quote then swap it
      */
-    if (pData.token0.symbol.toUpperCase() in CommonBscQuoteSymbol) {
+    if (pData.token0.id in CommonBscQuoteAddress) {
       this.logger.warn('{getSortedIdx} pair.token0 is known common quote symbol');
       baseSortedIdx = 1;
       quoteSortedIdx = 0;
-    } else if (pData.token1.symbol.toUpperCase() in CommonBscQuoteSymbol) {
+    } else if (pData.token1.id in CommonBscQuoteAddress) {
       this.logger.warn('{getSortedIdx} pair.token1 is known common quote symbol');
     } else {
       this.logger.warn('{getSortedIdx} Quote token is not known common quote symbol');
@@ -528,11 +533,11 @@ export class NewPairTradingService {
     };
   }
 
-  async chooseTradingVol(
+  async maxPossibleTradingVol(
     tradingDirectiveAutoConfig,
-    quoteTokenData,
-    baseReserve,
-    quoteReserve,
+    sellTokenData,
+    buyTokenReserve,
+    sellTokenReserve,
     lpSizeUsd,
   ): Promise<number> {
     const maxPairBudgetInUsd = tradingDirectiveAutoConfig.max_pair_budget_usd.toNumber();
@@ -552,22 +557,22 @@ export class NewPairTradingService {
     }
 
     // eslint-disable-next-line max-len
-    const quotePriceUsd = await this.pairRealtimeDataService.getSymbolPriceUsd(
-      quoteTokenData.symbol,
+    const sellTokenPriceUsd = await this.pairRealtimeDataService.getSymbolPriceUsd(
+      sellTokenData.symbol,
       this.pancakeswapV2Service.getChainId(),
-      quoteTokenData.id,
+      sellTokenData.id,
     );
-    if (quotePriceUsd === null) {
-      throw new AppError('Cannot get quotePriceUsd from pairRealtimeDataService', 'CannotGetSymbolPrice');
+    if (sellTokenPriceUsd === null) {
+      throw new AppError('Cannot get sellTokenPriceUsd from pairRealtimeDataService', 'CannotGetSymbolPrice');
     }
     // This is unsafe calculation
     // normally base value and quote value need to be the same
     // So quote_token_in_lp * quote_price ~= base_token_in_lp * base_price
-    const estimatedBasePriceUsd = (quoteReserve * quotePriceUsd) / baseReserve;
+    // const estimatedBuyPriceUsd = (sellTokenReserve * sellTokenPriceUsd) / buyTokenReserve;
+    // const maxBuyTokenVolumnInToken = maxVolInUsd / estimatedBuyPriceUsd; // NOTE: sell `quote` to buy `base`
+    const maxSellTokenAmount = maxVolInUsd / sellTokenPriceUsd; // NOTE: sell `quote` to buy `base`
 
-    const maxVolInToken = maxVolInUsd / estimatedBasePriceUsd; // NOTE: sell `quote` to buy `base`
-
-    return maxVolInToken;
+    return maxSellTokenAmount;
   }
 
   tryTp(p: PairCreateInput) {

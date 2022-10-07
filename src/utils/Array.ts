@@ -30,27 +30,27 @@ export function toDict<T>(items: T[], key = 'id'): Record<any, T> {
  * Convert array to dict with advance options
  *
  * @param items
- * @param transformFn(element, index) transform each array elem into object elem
- * @param getKeyFn(element) get dict key from element
- * @param filterFn(element, index) if filterFn was specified, only item that match the filterFn was return to result
+ * @param getValue(element, index) transform each array elem into object elem
+ * @param getKey(element) get dict key from element
+ * @param filter(element, index) if filter was specified, only item that match the filter was return to result
  */
-export function mapToDict<T, TAfter>(
-  items: T[],
-  transformFn: (item: T, idx: number) => TAfter,
-  getKeyFn: (item: T) => MapKey,
-  filterFn?: (item: T, idx: number) => boolean,
-): Record<MapKey, TAfter> {
-  const itemsObj = {} as Record<MapKey, TAfter>;
+export function mapToDict<TIn, TOut>(
+  items: TIn[],
+  getValue: (item: TIn, idx?: number) => TOut,
+  getKey: (item: TIn) => MapKey,
+  filter?: (item: TIn, idx: number) => boolean,
+): Record<MapKey, TOut> {
+  const itemsObj = {} as Record<MapKey, TOut>;
   for (let i = 0, c = items.length; i < c; i++) {
     const item = items[i];
-    const k = getKeyFn(item);
+    const k = getKey(item);
 
-    if (filterFn) {
-      if (filterFn(item, i)) {
-        itemsObj[k] = transformFn(item, i);
+    if (filter) {
+      if (filter(item, i)) {
+        itemsObj[k] = getValue(item, i);
       }
     } else {
-      itemsObj[k] = transformFn(item, i);
+      itemsObj[k] = getValue(item, i);
     }
   }
 

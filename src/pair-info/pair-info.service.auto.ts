@@ -23,7 +23,7 @@ export class PairInfoServiceAuto implements OnModuleInit {
   });
 
   private singlePairModeData = {
-    enabled: false,
+    enabled: true, // default is true, your must fire graphql mutation to start all pair
     pairOnChainId: null,
   };
 

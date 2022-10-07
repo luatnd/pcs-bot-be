@@ -69,6 +69,10 @@ export class PairRealtimeDataService {
   // For BSC only
   private isKnownStableCoin(symbol: string, address: string): boolean {
     const knownSymbol = CommonBscSymbol[symbol];
+    if (!knownSymbol) {
+      return false;
+    }
+
     return knownSymbol.address === address && knownSymbol.isStableCoin === true;
   }
 

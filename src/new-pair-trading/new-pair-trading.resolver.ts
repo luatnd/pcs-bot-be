@@ -1,26 +1,40 @@
 import { Query, Resolver } from '@nestjs/graphql';
 import { NewPairTradingService } from './new-pair-trading.service';
 import { PairCreateInput } from '../prisma/@generated/graphql/pair/pair-create.input';
-import { WBNB_HERO_pair } from '../../dextool';
+import { ANM_WBNB_97_pair, WBNB_HERO_pair } from '../../dextool';
+import { PancakeswapV2Service } from '../pancakeswap-v2/pancakeswap-v2.service';
+import { CommonBscQuoteSymbol, CommonBscSymbol } from '../pair-realtime-data/const/CommonBSCSymbol';
 
 @Resolver()
 export class NewPairTradingResolver {
-  constructor(private newPairTradingService: NewPairTradingService) {}
+  constructor(
+    private newPairTradingService: NewPairTradingService,
+    private pancakeswapV2Service: PancakeswapV2Service,
+  ) {}
 
   @Query(() => Boolean)
-  async tradingDebug(): Promise<any> {
+  async handleLpCreatedEventDebug(): Promise<any> {
     // const pair = await this.newPairTradingService.getPairById('ANM_BUSD_56_pancakev2');
     const pair: PairCreateInput = {
-      id: 'WBNB_HERO_56_pancakev2',
+      id: 'BNB_ANM_97_pancakev2',
       on_chain_id: '0xe267018c943e77992e7e515724b07b9ce7938124',
-      base: 'WBNB',
-      quote: 'HERO',
+      base: 'BNB',
+      quote: 'ANM',
       chain_id: 56,
       exchange_id: 'pancakev2',
-      data: WBNB_HERO_pair,
+      data: ANM_WBNB_97_pair,
       created_at: '2022-10-03 11:35:49.253',
       updated_at: '2022-10-03 16:33:19.244',
     };
     await this.newPairTradingService.handleLpCreatedEvent(pair);
+  }
+
+  @Query(() => Boolean)
+  async swapUnsafeDebug(): Promise<any> {
+    const ANM = ANM_WBNB_97_pair.token0;
+    const WBNB = CommonBscQuoteSymbol.WBNB;
+    const anmToken = this.pancakeswapV2Service.getAppToken(ANM.id, ANM.decimals, ANM.symbol, ANM.name);
+    const wBNBToken = this.pancakeswapV2Service.getAppToken(WBNB.address, WBNB.decimal, WBNB.symbol, 'WBNB');
+    await this.pancakeswapV2Service.swapUnsafe(anmToken, wBNBToken, '0.01', '1000'); // 10% slippage
   }
 }

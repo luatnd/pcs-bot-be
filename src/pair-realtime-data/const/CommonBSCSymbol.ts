@@ -9,6 +9,9 @@ type CommonSymbol = {
   isStableCoin?: boolean;
   symbolBinance?: string;
 };
+/**
+ * @deprecated Use CommonBscQuoteSymbol instead
+ */
 export const CommonBscSymbol: Record<UpperCaseSymbol, CommonSymbol> = {
   BUSD: {
     symbol: 'BUSD',
@@ -24,7 +27,8 @@ export const CommonBscSymbol: Record<UpperCaseSymbol, CommonSymbol> = {
   },
   WBNB: {
     symbol: 'WBNB',
-    address: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c',
+    address: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', // mainnet
+    // address: '0xae13d989dac2f0debff460ac112a837c89baa7cd', // testnet
     decimal: 18,
     symbolBinance: 'BNBUSDT',
   },
@@ -42,9 +46,22 @@ export const CommonBscSymbol: Record<UpperCaseSymbol, CommonSymbol> = {
   },
 };
 
-export const CommonBscQuoteSymbol = CommonBscSymbol;
+const CommonBscSymbolTestNet = CommonBscSymbol;
+CommonBscSymbolTestNet.WBNB.address = '0xae13d989dac2f0debff460ac112a837c89baa7cd';
+
+const CommonBscQuoteSymbols = {
+  56: CommonBscSymbol,
+  97: CommonBscSymbolTestNet,
+};
+
+const chainId = Number(process.env.CHAIN_ID);
+if (!chainId) {
+  throw new Error('env CHAIN_ID was not set');
+}
+
+export const CommonBscQuoteSymbol: Record<string, CommonSymbol> = CommonBscQuoteSymbols[chainId];
 export const CommonBscQuoteAddress = mapToDict(
-  Object.values(CommonBscSymbol),
+  Object.values(CommonBscQuoteSymbol),
   (i) => i.symbol,
   (i) => i.address,
 );

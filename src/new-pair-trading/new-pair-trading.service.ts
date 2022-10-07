@@ -341,12 +341,12 @@ export class NewPairTradingService {
 
     // quoteTokenAmountToSell in token, force min(5% LP, $500) to get quotes
     const quoteTokenAmountToSell = amountOfOwningTokenWeAttemptToSell;
-    const MIN_PRICE_IMPACT = 10 / 100;
-    const slippageTolerant = Math.floor(MIN_PRICE_IMPACT * 10000).toString(); // denominator is 10k in PcsV2 service
+    const MAX_PRICE_IMPACT = 10 / 100;
+    const slippageTolerant = Math.floor(MAX_PRICE_IMPACT * 10000).toString(); // denominator is 10k in PcsV2 service
     const quotes = await this.pancakeswapV2Service.getQuotation(
       base,
       quote,
-      quoteTokenAmountToSell.toString(),
+      (10000 * quoteTokenAmountToSell).toString(),
       slippageTolerant,
     );
     this.logger.log('{tryPlaceEntry} quotes: ', {
@@ -381,25 +381,16 @@ export class NewPairTradingService {
     //   );
     //   return;
     // }
-    console.log('{tryPlaceEntry} priceImpactPercent: ', priceImpactPercent, MIN_PRICE_IMPACT * 100);
+    this.logger.verbose('{tryPlaceEntry} priceImpactPercent, maxAllowed: ', priceImpactPercent, MAX_PRICE_IMPACT * 100);
 
     // price_impact <= 10%
-    if (priceImpactPercent > MIN_PRICE_IMPACT * 100) {
-      this.logger.warn(`SKIP: because of priceImpact=${priceImpactPercent} larger than ${MIN_PRICE_IMPACT * 100}%`);
+    if (priceImpactPercent > MAX_PRICE_IMPACT * 100) {
+      this.logger.warn(`SKIP: because of priceImpact=${priceImpactPercent} larger than ${MAX_PRICE_IMPACT * 100}%`);
       return;
     }
 
-    console.log('{tryPlaceEntry} stop here: ');
-    return;
-
     // if all cond met => Create order:
-    // TODO:
-    const MAX_VOL_PERCENT_BASE_ON_LP = 5;
-    const lpSizeInToken = Number(quotes.pooledTokenAmount0);
-    // const tradingVolInToken = (lpSizeInToken * MAX_VOL_PERCENT_BASE_ON_LP) / 100;
-    const tokenPriceUsd = 0; // TODO
-    // const tradingVolInUsd = tradingVolInToken * tokenPriceUsd;
-    const swapResult = await this.pancakeswapV2Service.swapExactETHForTokenWithTradeObject(
+    const swapResult = await this.pancakeswapV2Service.swapTokensWithTradeObject(
       quotes.trade,
       quotes.minimumAmountOut,
       base,
@@ -517,14 +508,16 @@ export class NewPairTradingService {
 
     const lpSizeUsd = (p.data as DtPairDynamicData).liquidity; // or can get LP from router quotation
     this.logger.debug('{tryPlaceEntry} lpSizeUsd: ' + lpSizeUsd);
-    if (lpSizeUsd < minLpSizeUsd) {
-      // this.logger.warn("SKIP: LP is not big enough: " + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`);
-      // return;
-      throw new AppError(
-        'SKIP: LP is not big enough: ' + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`,
-        'LpTooSmall',
-      );
-    }
+
+    // TODO: Turn this on for production, comment this for debug
+    // if (lpSizeUsd < minLpSizeUsd) {
+    //   // this.logger.warn("SKIP: LP is not big enough: " + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`);
+    //   // return;
+    //   throw new AppError(
+    //     'SKIP: LP is not big enough: ' + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`,
+    //     'LpTooSmall',
+    //   );
+    // }
 
     return {
       tradingDirectiveAutoConfig,

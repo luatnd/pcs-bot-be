@@ -38,6 +38,7 @@
     "@pancakeswap/sdk": "^2.4.5",
     "@prisma/client": "^4.4.0",
     "@sentry/node": "^7.6.0",
+    "@sotatek-anhdao/pancake-sdk-v2-testnet": "^2.2.4",
     "apollo-server-express": "^3.10.0",
     "bignumber.js": "^9.0.2",
     "binance-api-node": "^0.12.0",

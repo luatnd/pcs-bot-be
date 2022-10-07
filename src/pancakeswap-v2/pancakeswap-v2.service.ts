@@ -1,6 +1,17 @@
+/* eslint-disable max-len */
 import * as fs from 'fs';
 import { Injectable, Logger } from '@nestjs/common';
-import { ChainId, Fetcher, Pair, Percent, Route, Token, TokenAmount, Trade, TradeType } from '@pancakeswap/sdk';
+// import { Fetcher, Pair, Percent, Route, Token, TokenAmount, Trade, TradeType } from '@pancakeswap/sdk';
+import {
+  Fetcher,
+  Pair,
+  Percent,
+  Route,
+  Token,
+  TokenAmount,
+  Trade,
+  TradeType,
+} from '@sotatek-anhdao/pancake-sdk-v2-testnet';
 import { Contract, ethers, Wallet } from 'ethers';
 import { ConfigService } from '@nestjs/config';
 import EthersServer from '../blockchain/_utils/EthersServer';
@@ -10,7 +21,7 @@ import { AppError } from '../../libs/errors/base.error';
 export class PancakeswapV2Service {
   private readonly logger = new Logger(PancakeswapV2Service.name);
   private readonly ethersServer = new EthersServer();
-  private MainNet = true;
+  private chainId = 0;
 
   private provider: ethers.providers.BaseProvider;
   private routerContract: Contract;
@@ -18,6 +29,10 @@ export class PancakeswapV2Service {
 
   constructor(private configService: ConfigService) {
     this.provider = this.getAppProvider();
+
+    const chainId = Number(this.configService.get<string>('CHAIN_ID'));
+    this.chainId = chainId;
+    this.logger.log('{PancakeswapV2Service.constructor} chainId=' + chainId);
 
     const routerAddress = this.configService.get<string>('ROUTER_CONTRACT');
     if (!routerAddress) {
@@ -92,7 +107,9 @@ export class PancakeswapV2Service {
     return {
       trade,
 
+      // = token0Price right after create LP
       midPrice: route.midPrice,
+      // Price display on Pancake, right at execution
       executionPrice: trade.executionPrice,
       nextMidPrice: trade.nextMidPrice,
       priceImpact: trade.priceImpact,
@@ -111,15 +128,33 @@ export class PancakeswapV2Service {
     };
   }
 
-  async swapUnsafe(buyToken: Token, sellToken: Token, amount: string, slippage = '50') {
-    const { trade, minimumAmountOut } = await this.getQuotation(buyToken, sellToken, amount, slippage);
-    return this.swapExactETHForTokenWithTradeObject(trade, minimumAmountOut, buyToken, sellToken);
+  async swapUnsafe(buyToken: Token, owningToken: Token, owningSellAmount: string, slippage = '50') {
+    const quotes = await this.getQuotation(buyToken, owningToken, owningSellAmount, slippage);
+
+    this.logger.log('{tryPlaceEntry} quotes: ', {
+      trade: '... => Complex object',
+      midPrice: quotes.midPrice.toSignificant(),
+      executionPrice: quotes.executionPrice.toSignificant(),
+      nextMidPrice: quotes.nextMidPrice.toSignificant(),
+      priceImpact: quotes.priceImpact.toSignificant(),
+      minimumAmountOut: quotes.minimumAmountOut,
+      // number of token amount of base in LP
+      pooledTokenAmount0: quotes.pooledTokenAmount0,
+      // number of token amount of quote in LP
+      pooledTokenAmount1: quotes.pooledTokenAmount1,
+      // 1 base = x quote
+      token0Price: quotes.token0Price,
+      // 1 quote = x base
+      token1Price: quotes.token1Price,
+    });
+
+    return this.swapTokensWithTradeObject(quotes.trade, quotes.minimumAmountOut, buyToken, owningToken);
   }
 
   /**
    * @throws Error
    */
-  async swapExactETHForTokenWithTradeObject(
+  async swapTokensWithTradeObject(
     trade: Trade,
     minimumAmountOut: string,
     buyToken: Token,
@@ -127,10 +162,7 @@ export class PancakeswapV2Service {
     // amount: string,
     // slippage = '50',
   ) {
-    this.logger.log(
-      '{swapExactETHForTokenWithTradeObject} buyToken, sellToken, minimumAmountOut: ' +
-        `${buyToken.symbol}, ${sellToken.symbol}, ${minimumAmountOut}`,
-    );
+    this.logger.log('{swapTokensWithTradeObject} ' + `${sellToken.symbol} => ${buyToken.symbol}`);
 
     const wallet = this.wallet;
 
@@ -140,12 +172,20 @@ export class PancakeswapV2Service {
     const to = wallet.address; // should be a checksummed recipient address
     const deadlineInSecs = Math.floor(Date.now() / 1000) + 60 * 5; // 20 minutes from the current Unix time
     const inputAmount = trade.inputAmount.raw; // // needs to be converted to e.g. hex
+    const inputAmountInToken = Number(inputAmount) / Math.pow(10, sellToken.decimals);
+    this.logger.log(
+      '{swapTokensWithTradeObject} inputAmount: ' + inputAmount + ` = ${inputAmountInToken} ${sellToken.symbol}`,
+    );
     const valueHex = ethers.BigNumber.from(inputAmount.toString()).toHexString(); //convert to hex string
 
     // Return a copy of transactionRequest,
     // The default implementation calls checkTransaction and resolves to if it
     // is an ENS name, adds gasPrice, nonce, gasLimit and chainId based on
     // the related operations on Signer.
+
+    // TODO: This is case WBNB to Token => swapExactTokensForTokens
+    // TODO: To know which fn that pancake call,
+    //  => just check data tab of transaction while confirming on metamask
     const rawTxn = await this.routerContract.populateTransaction.swapExactETHForTokens(
       amountOutMinHex,
       path,
@@ -153,7 +193,8 @@ export class PancakeswapV2Service {
       deadlineInSecs,
       {
         value: valueHex,
-        // gasPrice: "100000000000" // 100 gwei
+        gasPrice: (1e10).toString(), // 10 gwei
+        gasLimit: (2e5).toString(), // 185829 is on metamask testnet
       },
     );
 
@@ -203,7 +244,7 @@ export class PancakeswapV2Service {
   }
 
   getChainId() {
-    return this.MainNet ? ChainId.MAINNET : ChainId.TESTNET;
+    return this.chainId;
   }
 
   getToken(chainId: number, address: string, decimal: number, symbol?: string): Token {

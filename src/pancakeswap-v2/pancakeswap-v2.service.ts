@@ -1,17 +1,7 @@
 /* eslint-disable max-len */
 import * as fs from 'fs';
 import { Injectable, Logger } from '@nestjs/common';
-// import { Fetcher, Pair, Percent, Route, Token, TokenAmount, Trade, TradeType } from '@pancakeswap/sdk';
-import {
-  Fetcher,
-  Pair,
-  Percent,
-  Route,
-  Token,
-  TokenAmount,
-  Trade,
-  TradeType,
-} from '@sotatek-anhdao/pancake-sdk-v2-testnet';
+import { Fetcher, Pair, Percent, Route, Token, TokenAmount, Trade, TradeType } from '@pancakeswap/sdk';
 import { Contract, ethers, Wallet } from 'ethers';
 import { ConfigService } from '@nestjs/config';
 import EthersServer from '../blockchain/_utils/EthersServer';

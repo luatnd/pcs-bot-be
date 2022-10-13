@@ -349,6 +349,10 @@ export class NewPairTradingService {
       return;
     }
 
+    // TODO: Approve max amount for all the common quotes token when program started,
+    //    cache approved contract to db to avoid re-approve, save time
+    // TODO: Approve the base token with max amount right here
+    //    cache approved contract to db to avoid re-approve, save time
     // quoteTokenAmountToSell in token, force min(5% LP, $500) to get quotes
     const quoteTokenAmountToSell = amountOfOwningTokenWeAttemptToSell;
     const MAX_PRICE_IMPACT = 10 / 100;

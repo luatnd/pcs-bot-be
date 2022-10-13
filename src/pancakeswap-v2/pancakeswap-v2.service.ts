@@ -6,6 +6,13 @@ import { Contract, ethers, Wallet } from 'ethers';
 import { ConfigService } from '@nestjs/config';
 import EthersServer from '../blockchain/_utils/EthersServer';
 import { AppError } from '../../libs/errors/base.error';
+import { CommonBscQuoteSymbol } from '../pair-realtime-data/const/CommonBSCSymbol';
+
+export type AppSwapOption = {
+  gasPrice?: number; // in wei
+  gasLimit?: number; // in wei
+};
+type AppSwapFn = 'swapExactETHForTokens' | 'swapExactTokensForETH' | 'swapExactTokensForTokens';
 
 @Injectable()
 export class PancakeswapV2Service {
@@ -118,7 +125,13 @@ export class PancakeswapV2Service {
     };
   }
 
-  async swapUnsafe(buyToken: Token, owningToken: Token, owningSellAmount: string, slippage = '50') {
+  async swapUnsafe(
+    buyToken: Token,
+    owningToken: Token,
+    owningSellAmount: string,
+    slippage = '50',
+    options?: AppSwapOption,
+  ) {
     const quotes = await this.getQuotation(buyToken, owningToken, owningSellAmount, slippage);
 
     this.logger.log('{tryPlaceEntry} quotes: ', {
@@ -138,7 +151,7 @@ export class PancakeswapV2Service {
       token1Price: quotes.token1Price,
     });
 
-    return this.swapTokensWithTradeObject(quotes.trade, quotes.minimumAmountOut, buyToken, owningToken);
+    return this.swapTokensWithTradeObject(quotes.trade, quotes.minimumAmountOut, buyToken, owningToken, options);
   }
 
   /**
@@ -149,8 +162,7 @@ export class PancakeswapV2Service {
     minimumAmountOut: string,
     buyToken: Token,
     sellToken: Token,
-    // amount: string,
-    // slippage = '50',
+    options?: AppSwapOption,
   ) {
     this.logger.log('{swapTokensWithTradeObject} ' + `${sellToken.symbol} => ${buyToken.symbol}`);
 
@@ -160,13 +172,15 @@ export class PancakeswapV2Service {
 
     const path = [buyToken.address, sellToken.address]; //An array of token addresses
     const to = wallet.address; // should be a checksummed recipient address
-    const deadlineInSecs = Math.floor(Date.now() / 1000) + 60 * 5; // 20 minutes from the current Unix time
+    const nextUnixDeadline = Math.floor(Date.now() / 1000) + 60 * 2; // secs unit
     const inputAmount = trade.inputAmount.raw; // // needs to be converted to e.g. hex
     const inputAmountInToken = Number(inputAmount) / Math.pow(10, sellToken.decimals);
     this.logger.log(
       '{swapTokensWithTradeObject} inputAmount: ' + inputAmount + ` = ${inputAmountInToken} ${sellToken.symbol}`,
     );
     const valueHex = ethers.BigNumber.from(inputAmount.toString()).toHexString(); //convert to hex string
+
+    const gasPrice = options?.gasPrice;
 
     // Return a copy of transactionRequest,
     // The default implementation calls checkTransaction and resolves to if it
@@ -176,17 +190,51 @@ export class PancakeswapV2Service {
     // TODO: This is case WBNB to Token => swapExactTokensForTokens
     // TODO: To know which fn that pancake call,
     //  => just check data tab of transaction while confirming on metamask
-    const rawTxn = await this.routerContract.populateTransaction.swapExactETHForTokens(
-      amountOutMinHex,
-      path,
-      to,
-      deadlineInSecs,
-      {
-        value: valueHex,
-        gasPrice: (1e10).toString(), // 10 gwei
-        gasLimit: (2e5).toString(), // 185829 is on metamask testnet
-      },
+    const swapFn = this.getSwapFn(buyToken, sellToken);
+    const swap = this.routerContract.populateTransaction[swapFn];
+
+    const swapOpt: Record<string, any> = {
+      value: valueHex,
+      // gasPrice: (1e10).toString(), // 10 gwei
+      gasLimit: (4e5).toString(), // 185829 is on metamask testnet
+    };
+    if (gasPrice && Number.isInteger(gasPrice)) {
+      swapOpt.gasPrice = gasPrice;
+    }
+
+    this.logger.log(
+      `{swapTokensWithTradeObject} ${swapFn} ${inputAmountInToken} ${sellToken.symbol} => ? ${buyToken.symbol}`,
     );
+    let rawTxn: ethers.PopulatedTransaction;
+    switch (swapFn) {
+      case 'swapExactETHForTokens':
+        /*
+        function swapExactETHForTokens(
+          uint amountOutMin, address[] calldata path, address to, uint deadline
+        ) external payable returns (uint[] memory amounts);
+         */
+        rawTxn = await swap(amountOutMinHex, path, to, nextUnixDeadline, swapOpt);
+        break;
+      case 'swapExactTokensForETH':
+        /*
+        function swapExactTokensForETH(
+          uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline
+        ) external returns (uint[] memory amounts);
+         */
+        rawTxn = await swap(trade.inputAmount, amountOutMinHex, path, to, nextUnixDeadline, swapOpt);
+        break;
+      case 'swapExactTokensForTokens':
+        /*
+        function swapExactTokensForTokens(
+          uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline
+        ) external returns (uint[] memory amounts);
+         */
+        rawTxn = await swap(trade.inputAmount, amountOutMinHex, path, to, nextUnixDeadline, swapOpt);
+        break;
+      default:
+        throw new AppError('Unhandled swapFn ' + swapFn, 'SwapFnInvalid');
+    }
+    this.logger.log('{PancakeswapV2Service.swapTokensWithTradeObject} rawTxn: ', rawTxn);
 
     //Returns a Promise which resolves to the transaction.
     let sendTxn: ethers.providers.TransactionResponse;
@@ -196,12 +244,12 @@ export class PancakeswapV2Service {
       if (e.code === 'INSUFFICIENT_FUNDS') {
         // eslint-disable-next-line max-len
         throw new AppError(
-          'swapExactETHForToken.sendTransaction: insufficient funds for intrinsic transaction cost',
+          '{swapTokensWithTradeObject} sendTransaction: insufficient funds for intrinsic transaction cost',
           e.code,
         );
       }
 
-      console.log('{swapExactETHForToken.sendTransaction} e.code: ' + e.code);
+      console.log('{swapTokensWithTradeObject} sendTransaction e.code: ' + e.code);
       throw e;
     }
 
@@ -210,12 +258,12 @@ export class PancakeswapV2Service {
       //Resolves to the TransactionReceipt once the transaction has been included in the chain for x confirms blocks.
       receipt = await sendTxn.wait();
     } catch (e) {
-      console.log('{swapExactETHForToken.wait} e.code, e: ' + e.code, e);
+      console.log('{swapTokensWithTradeObject} tx.wait e.code, e: ' + e.code, e);
       throw e;
     }
 
     //Logs the information about the transaction it has been mined.
-    console.log('{swapExactETHForToken} receipt: ', receipt);
+    console.log('{swapTokensWithTradeObject} receipt: ', receipt);
     console.log(
       ' - Transaction is mined - ' +
         '\n' +
@@ -231,6 +279,26 @@ export class PancakeswapV2Service {
     );
 
     // TODO:
+  }
+
+  // This is action for this bot only, other bot will have some more other actions
+  getSwapFn(buyToken: Token, sellToken: Token): AppSwapFn {
+    if (this.isNativeToken(sellToken.address)) {
+      // buy: fixed BNB > Token
+      return 'swapExactETHForTokens';
+    } else if (this.isNativeToken(buyToken.address)) {
+      // sell: fixed token > BNB
+      return 'swapExactTokensForETH';
+    } else {
+      // buy / sell: fixed token > token
+      return 'swapExactTokensForTokens';
+    }
+  }
+
+  isNativeToken(address: string): boolean {
+    // NOTE: CommonBscQuoteSymbol is already been dynamically base on chain_id
+    // address is case-insensitive
+    return address.toLowerCase() === CommonBscQuoteSymbol.WBNB.address.toLowerCase();
   }
 
   getChainId() {

@@ -34,7 +34,9 @@ export const CommonBscSymbol: Record<UpperCaseSymbol, CommonSymbol> = {
   },
   BNB: {
     symbol: 'BNB',
-    address: 'NATIVE_TOKEN_HAS_NO_ADDRESS',
+    // DEX use WBNB as mirror of BNB, native token has no address
+    // But DEX use WBNB address to trade BNB
+    address: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c',
     decimal: 18,
     symbolBinance: 'BNBUSDT',
   },
@@ -48,6 +50,7 @@ export const CommonBscSymbol: Record<UpperCaseSymbol, CommonSymbol> = {
 
 const CommonBscSymbolTestNet = CommonBscSymbol;
 CommonBscSymbolTestNet.WBNB.address = '0xae13d989dac2f0debff460ac112a837c89baa7cd';
+CommonBscSymbolTestNet.BNB.address = CommonBscSymbolTestNet.WBNB.address;
 
 const CommonBscQuoteSymbols = {
   56: CommonBscSymbol,
@@ -60,8 +63,10 @@ if (!chainId) {
 }
 
 export const CommonBscQuoteSymbol: Record<string, CommonSymbol> = CommonBscQuoteSymbols[chainId];
+
+// Key is lowercase address
 export const CommonBscQuoteAddress = mapToDict(
   Object.values(CommonBscQuoteSymbol),
   (i) => i.symbol,
-  (i) => i.address,
+  (i) => i.address.toLowerCase(),
 );

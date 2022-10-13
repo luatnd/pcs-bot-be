@@ -6,7 +6,7 @@ import { TradingIntendStatus } from '../prisma/@generated/graphql/prisma/trading
 import { TradingIntendCreateInput } from '../prisma/@generated/graphql/trading-intend/trading-intend-create.input';
 import { TradingIntendType } from '../prisma/@generated/graphql/prisma/trading-intend-type.enum';
 import { DtExchange, DtPair, DtPairDynamicData } from '../pair-info/type/dextool';
-import { PancakeswapV2Service } from '../pancakeswap-v2/pancakeswap-v2.service';
+import { AppSwapOption, PancakeswapV2Service } from '../pancakeswap-v2/pancakeswap-v2.service';
 // eslint-disable-next-line max-len
 import { PairDynamicDataCreateInput } from '../prisma/@generated/graphql/pair-dynamic-data/pair-dynamic-data-create.input';
 import { PrismaErrorCode } from '../prisma/const';
@@ -390,11 +390,16 @@ export class NewPairTradingService {
     }
 
     // if all cond met => Create order:
+    const opt: AppSwapOption = {};
+    if (tradingDirectiveAutoConfig.fixed_gas_price_in_gwei) {
+      opt.gasPrice = tradingDirectiveAutoConfig.fixed_gas_price_in_gwei * 1e9;
+    }
     const swapResult = await this.pancakeswapV2Service.swapTokensWithTradeObject(
       quotes.trade,
       quotes.minimumAmountOut,
       base,
       quote,
+      opt,
     );
 
     // TODO: Handle the case we don't have any quote balance,
@@ -422,11 +427,11 @@ export class NewPairTradingService {
      * Ensure base token is the token of the project
      * If base is common quote then swap it
      */
-    if (pData.token0.id in CommonBscQuoteAddress) {
+    if (pData.token0.id.toLowerCase() in CommonBscQuoteAddress) {
       this.logger.warn('{getSortedIdx} pair.token0 is known common quote symbol');
       baseSortedIdx = 1;
       quoteSortedIdx = 0;
-    } else if (pData.token1.id in CommonBscQuoteAddress) {
+    } else if (pData.token1.id.toLowerCase() in CommonBscQuoteAddress) {
       this.logger.warn('{getSortedIdx} pair.token1 is known common quote symbol');
     } else {
       this.logger.warn('{getSortedIdx} Quote token is not known common quote symbol');

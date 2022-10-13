@@ -25,6 +25,8 @@ export class PancakeswapV2Service {
   private routerContract: Contract;
   private wallet: Wallet;
 
+  public SLIPPAGE_DENOMINATOR = 10000;
+
   constructor(private configService: ConfigService) {
     this.provider = this.getAppProvider();
 
@@ -49,7 +51,7 @@ export class PancakeswapV2Service {
     this.logger.log(
       '{getQuotation} buyToken/owningToken, amount, slippage: ' +
         `${buyToken.symbol}/${owningToken.symbol}, ${owningSellAmount} token, ${Number(
-          new Percent(slippage, '10000').toSignificant(),
+          new Percent(slippage, this.SLIPPAGE_DENOMINATOR).toSignificant(),
         )}%`,
     );
     const provider = this.provider;
@@ -80,7 +82,7 @@ export class PancakeswapV2Service {
     const amountInBN = ethers.utils.parseEther(owningSellAmount.toString()); //helper function to convert ETH to Wei
     const amountIn = amountInBN.toString();
 
-    const slippageTolerance = new Percent(slippage, '10000'); // 50 bips, or 0.50% - Slippage tolerance
+    const slippageTolerance = new Percent(slippage, this.SLIPPAGE_DENOMINATOR); // 50 bips, or 0.50% - Slippage tolerance
 
     // https://docs.uniswap.org/sdk/2.0.0/reference/trade
     // information necessary to create a swap transaction.
@@ -105,9 +107,16 @@ export class PancakeswapV2Service {
     return {
       trade,
 
-      // = token0Price right after create LP
+      /*
+      NOTE: for ***Price props:
+        It's depend on route we will have ***Price will be token0/token1
+        It's always be quote token
+        It's always be ***Price = 1 quotes <=> ? base
+        It means "sell price"
+       */
+      // midPrice is current price, right before executio, eq to token0/1Price right after create LP
       midPrice: route.midPrice,
-      // Price display on Pancake, right at execution
+      // Price display on Pancake, right at execution, 1 quotes = ? base
       executionPrice: trade.executionPrice,
       nextMidPrice: trade.nextMidPrice,
       priceImpact: trade.priceImpact,
@@ -174,12 +183,14 @@ export class PancakeswapV2Service {
     const path = [sellToken.address, buyToken.address]; //An array of token addresses
     const to = wallet.address; // should be a checksummed recipient address
     const nextUnixDeadline = Math.floor(Date.now() / 1000) + 60 * 2; // secs unit
-    const inputAmount = trade.inputAmount.raw; // // needs to be converted to e.g. hex
-    const inputAmountInToken = Number(inputAmount) / Math.pow(10, sellToken.decimals);
+    const inputAmountWei = trade.inputAmount.raw; // needs to be converted to e.g. hex
+    const inputAmountWeiHex = ethers.BigNumber.from(inputAmountWei.toString()).toHexString();
+    const inputAmountInToken = Number(inputAmountWei) / Math.pow(10, sellToken.decimals);
     this.logger.log(
-      '{swapTokensWithTradeObject} inputAmount: ' + inputAmount + ` = ${inputAmountInToken} ${sellToken.symbol}`,
+      `{swapTokensWithTradeObject} inputAmountWei: ${inputAmountWei} ${inputAmountWeiHex}` +
+        ` = ${inputAmountInToken} ${sellToken.symbol} | received >= minimumAmountOut = ${minimumAmountOut} ${amountOutMinHex}`,
     );
-    const valueHex = ethers.BigNumber.from(inputAmount.toString()).toHexString(); //convert to hex string
+    const valueHex = ethers.BigNumber.from(inputAmountWei.toString()).toHexString(); //convert to hex string
 
     const gasPrice = options?.gasPrice;
 
@@ -195,7 +206,7 @@ export class PancakeswapV2Service {
     const swap = this.routerContract.populateTransaction[swapFn];
 
     const swapOpt: Record<string, any> = {
-      value: valueHex,
+      // value: valueHex,
       // gasPrice: (1e10).toString(), // 10 gwei
       gasLimit: (4e5).toString(), // 185829 is on metamask testnet
     };
@@ -214,7 +225,10 @@ export class PancakeswapV2Service {
           uint amountOutMin, address[] calldata path, address to, uint deadline
         ) external payable returns (uint[] memory amounts);
          */
-        rawTxn = await swap(amountOutMinHex, path, to, nextUnixDeadline, swapOpt);
+        rawTxn = await swap(amountOutMinHex, path, to, nextUnixDeadline, {
+          ...swapOpt,
+          value: valueHex,
+        });
         break;
       case 'swapExactTokensForETH':
         /*
@@ -222,15 +236,18 @@ export class PancakeswapV2Service {
           uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline
         ) external returns (uint[] memory amounts);
          */
-        rawTxn = await swap(trade.inputAmount, amountOutMinHex, path, to, nextUnixDeadline, swapOpt);
+        rawTxn = await swap(inputAmountWeiHex, amountOutMinHex, path, to, nextUnixDeadline, swapOpt);
         break;
       case 'swapExactTokensForTokens':
         /*
         function swapExactTokensForTokens(
           uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline
         ) external returns (uint[] memory amounts);
+
+        Issue 1: https://www.followchain.org/insufficient-output-amount-pancakeswap/
+        => Fixed by inputAmountWeiHex is wrong and got a token value instead of wei value
          */
-        rawTxn = await swap(trade.inputAmount, amountOutMinHex, path, to, nextUnixDeadline, swapOpt);
+        rawTxn = await swap(inputAmountWeiHex, amountOutMinHex, path, to, nextUnixDeadline, swapOpt);
         break;
       default:
         throw new AppError('Unhandled swapFn ' + swapFn, 'SwapFnInvalid');

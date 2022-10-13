@@ -301,6 +301,11 @@ export class NewPairTradingService {
     // ---- get realtime quote -----
     const pData = p.data as DtPair;
     const { baseSortedIdx: bi, quoteSortedIdx: qi } = this.getSortedIdx(pData);
+    if (bi === -1) {
+      this.logger.warn('{tryPlaceEntry} SKIP because no token pair is common quote token');
+      return;
+    }
+    // const bi = 1, qi = 0; // FAKE: this code for debug only
 
     const baseTokenData = pData['token' + bi]; // Can be token0 or token1
     const quoteTokenData = pData['token' + qi]; // Can be token0 or token1
@@ -336,6 +341,7 @@ export class NewPairTradingService {
         quoteReserve,
         lpSizeUsd,
       );
+      // amountOfOwningTokenWeAttemptToSell = 50; // FAKE: this is for debug only
     } catch (e) {
       this.logger.error('{tryPlaceEntry} Cannot choose trading vol: code, message, e: ' + e.code + ' ' + e.message);
       this.logger.error(e); // This is how to log to file logger
@@ -346,8 +352,8 @@ export class NewPairTradingService {
     // quoteTokenAmountToSell in token, force min(5% LP, $500) to get quotes
     const quoteTokenAmountToSell = amountOfOwningTokenWeAttemptToSell;
     const MAX_PRICE_IMPACT = 10 / 100;
-    const DENOMINATOR = 10000; // denominator is 10k in PcsV2 service
-    const slippageTolerant = Math.floor(MAX_PRICE_IMPACT * DENOMINATOR).toString();
+    const denom = this.pancakeswapV2Service.SLIPPAGE_DENOMINATOR; // denominator is 10k in PcsV2 service
+    const slippageTolerant = Math.floor(MAX_PRICE_IMPACT * denom).toString();
     const quotes = await this.pancakeswapV2Service.getQuotation(
       base,
       quote,
@@ -371,8 +377,9 @@ export class NewPairTradingService {
       token1Price: quotes.token1Price,
     });
 
-    const currentPrice = Number(quotes.executionPrice.toSignificant());
-    const midPrice = Number(quotes.midPrice.toSignificant());
+    // sell price
+    const executionPrice = Number(quotes.executionPrice.toSignificant());
+    const currentPrice = Number(quotes.midPrice.toSignificant());
     const nextMidPrice = Number(quotes.nextMidPrice.toSignificant());
     const priceImpactPercent = Number(quotes.priceImpact.toSignificant());
 
@@ -410,19 +417,35 @@ export class NewPairTradingService {
       );
     } catch (e) {
       this.logger.error(`swapTokensWithTradeObject: e: `, e);
+      console.error(e); // This is only way to log this error to console
       return;
+    }
+
+    const createEntrySucceed = !!swapResult;
+    if (createEntrySucceed) {
+      try {
+        this.setupTP(p);
+        this.setupSL(p);
+      } catch (e) {
+        this.logger.error(`setup TP/SL: e: `, e);
+      }
     }
 
     // Save to trade history
     try {
-      const receivedAmountInToken = ethers.utils.formatUnits(quotes.minimumAmountOut, quote.decimals);
+      // @ts-ignore
+      const buyPrice = 1 / executionPrice;
+      // const estimatedTokenReceived = ethers.utils.formatUnits(quotes.minimumAmountOut, quote.decimals);
+      // It's approximately amount, not strict equal
+      // sellAmount * sellPrice = sellAmount * (1 / buyPrice)
+      const estimatedTokenReceived = quoteTokenAmountToSell / buyPrice;
       await this.prisma.tradeHistory.create({
         data: {
           sell: quote.symbol,
           buy: base.symbol,
           sell_amount: quoteTokenAmountToSell,
-          received_amount: Number(receivedAmountInToken), // TODO: Check
-          price: quotes[`token${bi}Price`], // 1 base = ? quote
+          received_amount: Number(estimatedTokenReceived),
+          price: buyPrice, // 1 base = ? quote
           price_impact_percent: Number(quotes.priceImpact.toSignificant()),
           status: TradeHistoryStatus.S,
           duration: swapResult.duration,
@@ -430,6 +453,17 @@ export class NewPairTradingService {
         },
       });
       this.logger.verbose('{tryPlaceBuyEntry} tradeHistory.inserted: ');
+
+      await this.prisma.tradingIntend.update({
+        where: { id: tradingIntent.id },
+        data: {
+          // NOTE: When you sell all, note that this is not 100% correct number
+          // It's estimated, luckily it's might always smaller number than actual? => plz check
+          vol: Number(estimatedTokenReceived),
+          entry: buyPrice,
+        },
+      });
+      this.logger.verbose('{tryPlaceBuyEntry} tradingIntend.updated: ');
     } catch (e) {
       this.logger.error('tradeHistory.create: e: ', e);
     }
@@ -437,11 +471,8 @@ export class NewPairTradingService {
     // TODO: Handle the case we don't have any quote balance,
     //    eg: we wanna trade HERO/USDT but no USDT left
 
-    const createEntrySucceed = !!swapResult;
-    if (createEntrySucceed) {
-      this.setupTP(p);
-      this.setupSL(p);
-    }
+    // TODO: Can sometime accidentally sell all quotes?
+    //  => Need to verify and never sellQuotes in FindingExit phase
   }
 
   /**
@@ -451,8 +482,8 @@ export class NewPairTradingService {
   private getSortedIdx(pairData: DtPair): { quoteSortedIdx: number; baseSortedIdx: number } {
     const pData: DtPair = { ...pairData };
 
-    let baseSortedIdx = 0;
-    let quoteSortedIdx = 1;
+    let baseSortedIdx = -1;
+    let quoteSortedIdx = -1;
 
     /**
      * Ensure base token is the token of the project
@@ -464,8 +495,10 @@ export class NewPairTradingService {
       quoteSortedIdx = 0;
     } else if (pData.token1.id.toLowerCase() in CommonBscQuoteAddress) {
       this.logger.warn('{getSortedIdx} pair.token1 is known common quote symbol');
+      baseSortedIdx = 0;
+      quoteSortedIdx = 1;
     } else {
-      this.logger.warn('{getSortedIdx} Quote token is not known common quote symbol');
+      this.logger.warn('{getSortedIdx} No token is known for common quote symbol');
     }
 
     // TODO: Handle the case we don't have any quote balance,

@@ -27,6 +27,8 @@ export class NewPairTradingResolver {
       updated_at: '2022-10-03 16:33:19.244',
     };
     await this.newPairTradingService.handleLpCreatedEvent(pair);
+
+    return true;
   }
 
   @Query(() => Boolean)
@@ -36,5 +38,7 @@ export class NewPairTradingResolver {
     const anmToken = this.pancakeswapV2Service.getAppToken(ANM.id, ANM.decimals, ANM.symbol, ANM.name);
     const wBNBToken = this.pancakeswapV2Service.getAppToken(WBNB.address, WBNB.decimal, WBNB.symbol, 'WBNB');
     await this.pancakeswapV2Service.swapUnsafe(anmToken, wBNBToken, '0.01', '1000'); // 10% slippage
+
+    return true;
   }
 }

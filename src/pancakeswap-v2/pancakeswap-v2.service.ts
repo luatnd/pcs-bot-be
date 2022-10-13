@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import EthersServer from '../blockchain/_utils/EthersServer';
 import { AppError } from '../../libs/errors/base.error';
 import { CommonBscQuoteSymbol } from '../pair-realtime-data/const/CommonBSCSymbol';
+import { round } from '../utils/number';
 
 export type AppSwapOption = {
   gasPrice?: number; // in wei
@@ -165,12 +166,12 @@ export class PancakeswapV2Service {
     options?: AppSwapOption,
   ) {
     this.logger.log('{swapTokensWithTradeObject} ' + `${sellToken.symbol} => ${buyToken.symbol}`);
-
+    const durationStart = Date.now();
     const wallet = this.wallet;
 
     const amountOutMinHex = ethers.BigNumber.from(minimumAmountOut).toHexString();
 
-    const path = [buyToken.address, sellToken.address]; //An array of token addresses
+    const path = [sellToken.address, buyToken.address]; //An array of token addresses
     const to = wallet.address; // should be a checksummed recipient address
     const nextUnixDeadline = Math.floor(Date.now() / 1000) + 60 * 2; // secs unit
     const inputAmount = trade.inputAmount.raw; // // needs to be converted to e.g. hex
@@ -262,23 +263,46 @@ export class PancakeswapV2Service {
       throw e;
     }
 
-    //Logs the information about the transaction it has been mined.
-    console.log('{swapTokensWithTradeObject} receipt: ', receipt);
-    console.log(
-      ' - Transaction is mined - ' +
-        '\n' +
-        'Transaction Hash:' +
-        sendTxn.hash +
-        '\n' +
-        'Block Number: ' +
-        receipt.blockNumber +
-        '\n' +
-        'Navigate to https://bscscan.io/tx/' +
-        sendTxn.hash +
-        ' to see your transaction',
-    );
+    const durationStop = Date.now();
 
-    // TODO:
+    //Logs the information about the transaction it has been mined.
+    const rc = this.normalizeReceipt(receipt);
+    this.logger.log('{swapTokensWithTradeObject} SUCCESS with receipt: ', rc);
+
+    // TODO: PCS UI price is delayed 10-20s after tx succeeded, is router contract price delayed too?
+
+    return {
+      ...rc,
+      duration: round((durationStop - durationStart) / 1000, 2),
+    };
+  }
+
+  normalizeReceipt(r: ethers.providers.TransactionReceipt): {
+    transactionHash: any;
+    blockNumber: any;
+    to: any;
+    from: any;
+    gasUsed: any;
+    cumulativeGasUsed: any;
+    effectiveGasPrice: any;
+    byzantium: any;
+    confirmations: any;
+    status: any;
+    type: any;
+  } {
+    return {
+      transactionHash: r.transactionHash,
+      blockNumber: r.blockNumber,
+      to: r.to,
+      from: r.from,
+      gasUsed: r.gasUsed.toString(),
+      cumulativeGasUsed: r.cumulativeGasUsed.toString(),
+      effectiveGasPrice: r.effectiveGasPrice.toString(),
+      byzantium: r.byzantium,
+      confirmations: r.confirmations,
+      status: r.status,
+      type: r.type,
+    };
   }
 
   // This is action for this bot only, other bot will have some more other actions

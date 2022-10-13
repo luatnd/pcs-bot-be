@@ -17,6 +17,8 @@ import { CommonBscQuoteAddress, CommonBscQuoteSymbol } from '../pair-realtime-da
 // eslint-disable-next-line max-len
 import { TradingDirectiveAutoConfig } from '../prisma/@generated/graphql/trading-directive-auto-config/trading-directive-auto-config.model';
 import { PairRealtimeDataService } from '../pair-realtime-data/pair-realtime-data.service';
+import { TradeHistoryStatus } from '../prisma/@generated/graphql/prisma/trade-history-status.enum';
+import { ethers } from 'ethers';
 
 type PairId = string;
 
@@ -60,14 +62,15 @@ export class NewPairTradingService {
       reserveUpdatedAt: d.reserveUpdatedAt,
     };
 
-    // Stop setup if pair already exist
+    // OLD: Stop setup if pair already exist
+    // NEW: We can ignore it, because it's not cause any accident
     try {
       await this.prisma.pairDynamicData.create({
         data: pairDynamicDataRecord,
       });
     } catch (e) {
-      this.logger.error('{handleLpCreatedEvent} e.code, e: ', e.code, e);
-      return;
+      this.logger.warn('{handleLpCreatedEvent} pairDynamicData.create: e.code, e: ', e.code, e);
+      // return;
     }
 
     this.startNewPairTradingFlow(payload);
@@ -220,6 +223,7 @@ export class NewPairTradingService {
     const tradingIntend: TradingIntendCreateInput = {
       pair_id: p.id,
       type: TradingIntendType.Auto,
+      vol: null,
       entry: null,
       tp: null,
       sl: null,
@@ -321,7 +325,7 @@ export class NewPairTradingService {
       quoteTokenData.name,
     );
 
-    // This volumn is for get quotes only, we will not trade using this vol
+    // This volume is for get quotes only, we will not trade using this vol
     let amountOfOwningTokenWeAttemptToSell = 0;
     try {
       // we're going to buy Base, sell quote token, mean swap [quote => base]
@@ -342,11 +346,12 @@ export class NewPairTradingService {
     // quoteTokenAmountToSell in token, force min(5% LP, $500) to get quotes
     const quoteTokenAmountToSell = amountOfOwningTokenWeAttemptToSell;
     const MAX_PRICE_IMPACT = 10 / 100;
-    const slippageTolerant = Math.floor(MAX_PRICE_IMPACT * 10000).toString(); // denominator is 10k in PcsV2 service
+    const DENOMINATOR = 10000; // denominator is 10k in PcsV2 service
+    const slippageTolerant = Math.floor(MAX_PRICE_IMPACT * DENOMINATOR).toString();
     const quotes = await this.pancakeswapV2Service.getQuotation(
       base,
       quote,
-      (10000 * quoteTokenAmountToSell).toString(),
+      quoteTokenAmountToSell.toString(),
       slippageTolerant,
     );
     this.logger.log('{tryPlaceEntry} quotes: ', {
@@ -390,23 +395,49 @@ export class NewPairTradingService {
     }
 
     // if all cond met => Create order:
+    let swapResult;
     const opt: AppSwapOption = {};
     if (tradingDirectiveAutoConfig.fixed_gas_price_in_gwei) {
       opt.gasPrice = tradingDirectiveAutoConfig.fixed_gas_price_in_gwei * 1e9;
     }
-    const swapResult = await this.pancakeswapV2Service.swapTokensWithTradeObject(
-      quotes.trade,
-      quotes.minimumAmountOut,
-      base,
-      quote,
-      opt,
-    );
+    try {
+      swapResult = await this.pancakeswapV2Service.swapTokensWithTradeObject(
+        quotes.trade,
+        quotes.minimumAmountOut,
+        base,
+        quote,
+        opt,
+      );
+    } catch (e) {
+      this.logger.error(`swapTokensWithTradeObject: e: `, e);
+      return;
+    }
+
+    // Save to trade history
+    try {
+      const receivedAmountInToken = ethers.utils.formatUnits(quotes.minimumAmountOut, quote.decimals);
+      await this.prisma.tradeHistory.create({
+        data: {
+          sell: quote.symbol,
+          buy: base.symbol,
+          sell_amount: quoteTokenAmountToSell,
+          received_amount: Number(receivedAmountInToken), // TODO: Check
+          price: quotes[`token${bi}Price`], // 1 base = ? quote
+          price_impact_percent: Number(quotes.priceImpact.toSignificant()),
+          status: TradeHistoryStatus.S,
+          duration: swapResult.duration,
+          receipt: swapResult,
+        },
+      });
+      this.logger.verbose('{tryPlaceBuyEntry} tradeHistory.inserted: ');
+    } catch (e) {
+      this.logger.error('tradeHistory.create: e: ', e);
+    }
 
     // TODO: Handle the case we don't have any quote balance,
     //    eg: we wanna trade HERO/USDT but no USDT left
 
-    // TODO:
-    const createEntrySucceed = false;
+    const createEntrySucceed = !!swapResult;
     if (createEntrySucceed) {
       this.setupTP(p);
       this.setupSL(p);

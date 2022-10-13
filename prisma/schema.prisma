@@ -131,6 +131,7 @@ model TradingIntend {
   id                  Int       @id @default(autoincrement())
   pair_id             String
   type                TradingIntendType
+  vol                 Decimal? @db.Decimal(24,12)
   entry               Decimal? @db.Decimal(24,12)
   tp                  Decimal? @db.Decimal(24,12)
   sl                  Decimal? @db.Decimal(24,12)
@@ -190,6 +191,31 @@ model TradingDirectiveAutoConfig {
 //   sl                  String
 //   status              TradingIntendStatus
 // }
+
+enum TradeHistoryStatus {
+  D         // Deleted, was soft deleted
+  S         // Successed
+  F         // Failed
+}
+model TradeHistory {
+  id                Int       @id @default(autoincrement())
+
+  sell              String
+  buy               String
+  sell_amount       Decimal? @db.Decimal(24,12)
+  received_amount   Decimal? @db.Decimal(24,12)
+  price             Decimal? @db.Decimal(24,12)
+  price_impact_percent      Decimal? @db.Decimal(5,2)
+
+  status            TradeHistoryStatus @default(S)
+  duration          Float?
+  receipt           Json?
+
+  created_at DateTime   @default(now())
+  updated_at DateTime?   @updatedAt
+
+  @@map("trade_histories")
+}
 
 
 

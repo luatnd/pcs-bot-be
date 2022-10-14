@@ -6,5 +6,5 @@ export type ValidateQuotation = {
   quote: Token;
   quotes: QuotationResult;
   maxPriceImpactPercent: number;
-  quoteTokenAmountToSell: number;
+  tokenAmountToSell: number;
 };

@@ -8,6 +8,7 @@ import EthersServer from '../blockchain/_utils/EthersServer';
 import { AppError } from '../../libs/errors/base.error';
 import { CommonBscQuoteSymbol } from '../pair-realtime-data/const/CommonBSCSymbol';
 import { round } from '../utils/number';
+import { QuotationResult } from './type';
 
 export type AppSwapOption = {
   gasPrice?: number; // in wei
@@ -47,7 +48,12 @@ export class PancakeswapV2Service {
     this.wallet = this.getAppWallet();
   }
 
-  async getQuotation(buyToken: Token, owningToken: Token, owningSellAmount: string, slippage = '50') {
+  async getQuotation(
+    buyToken: Token,
+    owningToken: Token,
+    owningSellAmount: string,
+    slippage = '50',
+  ): Promise<QuotationResult> {
     this.logger.log(
       '{getQuotation} buyToken/owningToken, amount, slippage: ' +
         `${buyToken.symbol}/${owningToken.symbol}, ${owningSellAmount} token, ${Number(

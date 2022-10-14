@@ -58,6 +58,10 @@ async function persistCache(service) {
   service.setActiveTradingPair('UNIT_TEST_' + Date.now(), true);
 
   await sleep(200); // wait for db writing
+  // can persist twice without duplication
+  service.setActiveTradingPair('UNIT_TEST_1', true);
+
+  await sleep(200); // wait for db writing
   const inDb = await service.activeTradingPairs.hasPersisted('UNIT_TEST_1');
   expect(inDb).toBeTruthy();
 }

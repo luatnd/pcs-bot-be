@@ -36,12 +36,18 @@ export class ActiveTradingPairs {
     if (active) {
       this.activeTradingPairs.set(pairId, true);
       try {
-        this.prisma.activeTradingPair.create({ data: { pair_id: pairId } }).then();
+        this.prisma.activeTradingPair
+          .create({ data: { pair_id: pairId } })
+          .then()
+          .catch((e) => false);
       } catch (e) {}
     } else {
       this.activeTradingPairs.delete(pairId);
       try {
-        this.prisma.activeTradingPair.delete({ where: { pair_id: pairId } }).then();
+        this.prisma.activeTradingPair
+          .delete({ where: { pair_id: pairId } })
+          .then()
+          .catch((e) => false);
       } catch (e) {}
     }
   }

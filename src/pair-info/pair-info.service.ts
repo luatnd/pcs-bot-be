@@ -26,7 +26,8 @@ export class PairInfoService {
     // NOTE: We should ignore if pool is created long time ago
     try {
       const pairAgeInMinutes = (Date.now() - new Date(dtPair.createdAt).getTime()) / (60 * 1000);
-      if (pairAgeInMinutes > MAX_MINUTES_ALLOWED) {
+      const allow = 0 < pairAgeInMinutes && pairAgeInMinutes < MAX_MINUTES_ALLOWED;
+      if (!allow) {
         this.logger.debug(`{createPool} SKIP: created ${pairAgeInMinutes}min ago > ${MAX_MINUTES_ALLOWED}min allowed`);
         return;
       }

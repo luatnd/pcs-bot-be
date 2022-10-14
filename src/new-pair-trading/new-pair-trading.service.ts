@@ -21,6 +21,7 @@ import { TradeHistoryStatus } from '../prisma/@generated/graphql/prisma/trade-hi
 import { ActiveTradingPairs } from './util/ActiveTradingPairs';
 import { ValidateQuotation } from './type';
 import { round } from '../utils/number';
+import { TradingDirectiveAuto } from './util/TradingDirectiveAuto';
 
 @Injectable()
 export class NewPairTradingService {
@@ -28,6 +29,7 @@ export class NewPairTradingService {
 
   public activeTradingPairs: ActiveTradingPairs;
   public activeQuoteSymbols: Map<string, true> = new Map();
+  public tradingDirectiveAuto: TradingDirectiveAuto;
 
   constructor(
     private prisma: PrismaService,
@@ -37,6 +39,7 @@ export class NewPairTradingService {
   ) {
     this.activeTradingPairs = new ActiveTradingPairs(prisma);
     this.loadSupportedQuoteSymbols();
+    this.tradingDirectiveAuto = new TradingDirectiveAuto(prisma);
   }
 
   @OnEvent('lp.created', { async: true })
@@ -301,7 +304,7 @@ export class NewPairTradingService {
     const purpose = 'entry';
     await this.lockTrade(tradingIntent, purpose);
 
-    const tradingDirectiveAutoConfig = await this.prisma.tradingDirectiveAutoConfig.findFirst();
+    const tradingDirectiveAutoConfig = this.tradingDirectiveAuto.config;
     if (tradingDirectiveAutoConfig === null) {
       this.logger.error(new AppError('SKIP: tradingDirectiveAutoConfig not exist', 'MissingDbConfig'));
       await this.reverseTradeOnError(tradingIntent, purpose);
@@ -821,15 +824,14 @@ export class NewPairTradingService {
       return;
     }
 
-    const purpose = 'tp';
-    await this.lockTrade(tradingIntent, purpose);
-
-    const tradingDirectiveAutoConfig = await this.prisma.tradingDirectiveAutoConfig.findFirst();
+    const tradingDirectiveAutoConfig = this.tradingDirectiveAuto.config;
     if (tradingDirectiveAutoConfig === null) {
       this.logger.error(new AppError('SKIP: tradingDirectiveAutoConfig not exist', 'MissingDbConfig'));
-      await this.reverseTradeOnError(tradingIntent, purpose);
       return;
     }
+
+    const purpose = 'tp';
+    await this.lockTrade(tradingIntent, purpose);
 
     // LP for selling don't need to be big enough, warning is enough
     let lpInfo: {
@@ -1005,15 +1007,25 @@ export class NewPairTradingService {
       return;
     }
 
-    const purpose = 'sl';
-    await this.lockTrade(tradingIntent, purpose);
-
-    const tradingDirectiveAutoConfig = await this.prisma.tradingDirectiveAutoConfig.findFirst();
+    const tradingDirectiveAutoConfig = this.tradingDirectiveAuto.config;
     if (tradingDirectiveAutoConfig === null) {
       this.logger.error(new AppError('{trySl} SKIP: tradingDirectiveAutoConfig not exist', 'MissingDbConfig'));
-      await this.reverseTradeOnError(tradingIntent, purpose);
       return;
     }
+
+    // Only start to check SL if trade intend created for some minutes
+    const slDelayInMin = tradingDirectiveAutoConfig.sl_start_after_mins;
+    const intendCreatedFor = Date.now() - tradingIntent.created_at.getTime();
+    if (intendCreatedFor < slDelayInMin * 60000) {
+      // eslint-disable-next-line max-len
+      this.logger.verbose(
+        `{trySl} Not enough ${slDelayInMin} mins, got ${round(intendCreatedFor / (1000 * 60), 2)} mins`,
+      );
+      return;
+    }
+
+    const purpose = 'sl';
+    await this.lockTrade(tradingIntent, purpose);
 
     // LP for selling don't need to be big enough, warning is enough
     let lpInfo: {
@@ -1144,7 +1156,7 @@ export class NewPairTradingService {
           // NOTE: When you sell all, note that this is not 100% correct number
           // It's estimated, luckily it's might always smaller number than actual? => plz check
           vol: Number(estimatedTokenReceived),
-          tp: sellPrice,
+          sl: sellPrice,
           status: TradingIntendStatus.SL,
           profit_percent: round((100 * (sellPrice - entryPrice)) / entryPrice, 2),
         },

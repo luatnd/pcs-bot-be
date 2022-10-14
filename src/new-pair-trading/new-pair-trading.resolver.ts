@@ -107,4 +107,26 @@ export class NewPairTradingResolver {
 
     return true;
   }
+
+  @Query(() => Boolean)
+  async trySlDebug(@Args('pw') pw: string): Promise<any> {
+    if (pw !== this.configService.get<string>('DEBUG_PASSWORD')) {
+      throw new AppError('Invalid password', 'InvalidDebugPassword');
+    }
+
+    const pair: PairCreateInput = {
+      id: 'ANM_BNB_97_pancakev2',
+      on_chain_id: '0xe267018c943e77992e7e515724b07b9ce7938124',
+      base: 'ANM',
+      quote: 'BNB',
+      chain_id: this.pancakeswapV2Service.getChainId(),
+      exchange_id: 'pancakev2',
+      data: ANM_WBNB_97_pair,
+      created_at: '2022-10-03 11:35:49.253',
+      updated_at: '2022-10-03 16:33:19.244',
+    };
+    await this.newPairTradingService.trySl(pair);
+
+    return true;
+  }
 }

@@ -167,6 +167,8 @@ model TradingDirectiveAutoConfig {
   tp_target                  Decimal @db.Decimal(6,2)
   sl_notice_target           Decimal @db.Decimal(6,2)
   sl_target                  Decimal @db.Decimal(6,2)
+  // will start to trySl after place an entry successfully for some minutes
+  sl_start_after_mins        Int
 
   // How many USD you wanna spent for a single pair?
   min_pair_budget_usd        Decimal @db.Decimal(8,2)

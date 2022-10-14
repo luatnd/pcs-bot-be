@@ -18,22 +18,22 @@ import { CommonBscQuoteAddress } from '../pair-realtime-data/const/CommonBSCSymb
 import { TradingDirectiveAutoConfig } from '../prisma/@generated/graphql/trading-directive-auto-config/trading-directive-auto-config.model';
 import { PairRealtimeDataService } from '../pair-realtime-data/pair-realtime-data.service';
 import { TradeHistoryStatus } from '../prisma/@generated/graphql/prisma/trade-history-status.enum';
-
-type PairId = string;
+import { ActiveTradingPairs } from './util/ActiveTradingPairs';
 
 @Injectable()
 export class NewPairTradingService {
   private readonly logger = new Logger(NewPairTradingService.name);
 
-  // Simple cache using hash map
-  private activeTradingPairs: Map<PairId, true> = new Map<PairId, true>();
+  public activeTradingPairs: ActiveTradingPairs;
 
   constructor(
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
     private pancakeswapV2Service: PancakeswapV2Service,
     private pairRealtimeDataService: PairRealtimeDataService,
-  ) {}
+  ) {
+    this.activeTradingPairs = new ActiveTradingPairs(prisma);
+  }
 
   @OnEvent('lp.created', { async: true })
   async handleLpCreatedEvent(payload: PairCreateInput) {
@@ -155,22 +155,22 @@ export class NewPairTradingService {
 
     // TODO:
 
-    const pairId = payload.id;
-    this.logger.log('{handleLpUpdatedEvent} : ' + pairId);
-
-    // update to db
-    const r = await this.prisma.pairRealtimeQuote.update({
-      where: { pair_id: pairId },
-      data: {
-        // TODO:
-        current_price: 0,
-        price_impact: 0,
-      },
-    });
-
-    await this.tryPlaceBuyEntry(payload);
-    await this.tryTp(payload);
-    await this.trySl(payload);
+    // const pairId = payload.id;
+    // this.logger.log('{handleLpUpdatedEvent} : ' + pairId);
+    //
+    // // update to db
+    // const r = await this.prisma.pairRealtimeQuote.update({
+    //   where: { pair_id: pairId },
+    //   data: {
+    //     // TODO:
+    //     current_price: 0,
+    //     price_impact: 0,
+    //   },
+    // });
+    //
+    // await this.tryPlaceBuyEntry(payload);
+    // await this.tryTp(payload);
+    // await this.trySl(payload);
   }
 
   async handleLpRugPullOrIgnoreIt(payload: PairCreateInput) {
@@ -236,11 +236,7 @@ export class NewPairTradingService {
   }
 
   setActiveTradingPair(pairId: string, active: boolean) {
-    if (active) {
-      this.activeTradingPairs.set(pairId, true);
-    } else {
-      this.activeTradingPairs.delete(pairId);
-    }
+    this.activeTradingPairs.set(pairId, active);
   }
 
   setupPriceTracking(p: PairCreateInput) {

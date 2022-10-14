@@ -218,6 +218,16 @@ model TradeHistory {
   @@map("trade_histories")
 }
 
+// Primary data source of activeTradingPairs data is in-memory
+// This table is secondary data source for persisting the cache data.
+// Program will load this data into memory on init
+// And persist to this table on change
+model ActiveTradingPair {
+  pair_id              String     @id
+  created_at           DateTime   @default(now())
+
+  @@map("active_trading_pairs")
+}
 
 
 model AppConfig {

@@ -13,7 +13,7 @@ import { PrismaErrorCode } from '../prisma/const';
 import { TradingIntend } from '../prisma/@generated/graphql/trading-intend/trading-intend.model';
 import { Pair } from '../prisma/@generated/graphql/pair/pair.model';
 import { AppError } from '../../libs/errors/base.error';
-import { CommonBscQuoteAddress } from '../pair-realtime-data/const/CommonBSCSymbol';
+import { CommonBscQuoteAddress, CommonBscQuoteSymbol } from '../pair-realtime-data/const/CommonBSCSymbol';
 // eslint-disable-next-line max-len
 import { TradingDirectiveAutoConfig } from '../prisma/@generated/graphql/trading-directive-auto-config/trading-directive-auto-config.model';
 import { PairRealtimeDataService } from '../pair-realtime-data/pair-realtime-data.service';
@@ -22,6 +22,8 @@ import { ActiveTradingPairs } from './util/ActiveTradingPairs';
 import { ValidateQuotation } from './type';
 import { round } from '../utils/number';
 import { TradingDirectiveAuto } from './util/TradingDirectiveAuto';
+import { AddressApprovalCache } from '../pancakeswap-v2/util/AddressApprovalCache';
+import { add } from 'husky';
 
 @Injectable()
 export class NewPairTradingService {
@@ -30,6 +32,7 @@ export class NewPairTradingService {
   public activeTradingPairs: ActiveTradingPairs;
   public activeQuoteSymbols: Map<string, true> = new Map();
   public tradingDirectiveAuto: TradingDirectiveAuto;
+  public addressApprovalCache: AddressApprovalCache;
 
   constructor(
     private prisma: PrismaService,
@@ -40,6 +43,9 @@ export class NewPairTradingService {
     this.activeTradingPairs = new ActiveTradingPairs(prisma);
     this.loadSupportedQuoteSymbols();
     this.tradingDirectiveAuto = new TradingDirectiveAuto(prisma);
+    this.addressApprovalCache = new AddressApprovalCache(prisma);
+
+    this.addressApprovalCache.loadData(pancakeswapV2Service.wallet.address).catch((e) => false);
   }
 
   @OnEvent('lp.created', { async: true })
@@ -548,10 +554,15 @@ export class NewPairTradingService {
       throw new AppError('{validateQuotation} SKIP: Invalid sell amount: ' + maxPossibleSellAmount, 'CannotGetMaxVol');
     }
 
-    // TODO: Approve max amount for all the common quotes token when program started,
-    //    cache approved contract to db to avoid re-approve, save time
-    // TODO: Approve the base token with max amount right here
-    //    cache approved contract to db to avoid re-approve, save time
+    /**
+     * token approval
+     *
+     * Why approve here:
+     * - We need to approve asap, then right after getQuotation, we can trade immediately
+     * - Approve with cache, so we only need to approve once
+     */
+    await this.enableTokenTradingWithCache(base.address);
+
     // tokenAmountToSell in token, force min(5% LP, $500) to get quotes
     let tokenAmountToSell = 0;
     switch (purpose) {
@@ -1206,6 +1217,15 @@ export class NewPairTradingService {
       for (let i = 0, c = symbols.length; i < c; i++) {
         const item = symbols[i];
         this.activeQuoteSymbols.set(item, true);
+
+        // try to approve this token
+        try {
+          const commonSymbol = CommonBscQuoteSymbol[item];
+          const address = commonSymbol?.address;
+          if (address) {
+            await this.enableTokenTradingWithCache(address);
+          }
+        } catch (e) {}
       }
     } else {
       throw new AppError('No activeQuoteSymbols found, plz set app_config.activeQuoteSymbols');
@@ -1213,15 +1233,34 @@ export class NewPairTradingService {
   }
 
   async setSupportedQuoteSymbols(symbols: string[]) {
+    const validSymbols = symbols.map((i) => i.toUpperCase()).filter((i) => i in CommonBscQuoteSymbol);
+    this.logger.log('{setSupportedQuoteSymbols} validSymbols: ', validSymbols);
+
     this.activeQuoteSymbols = new Map<string, true>();
-    for (let i = 0, c = symbols.length; i < c; i++) {
-      const item = symbols[i];
+    for (let i = 0, c = validSymbols.length; i < c; i++) {
+      const item = validSymbols[i];
       this.activeQuoteSymbols.set(item, true);
     }
 
     await this.prisma.appConfig.update({
       where: { key: 'activeQuoteSymbols' },
-      data: { value: JSON.stringify(symbols) },
+      data: { value: JSON.stringify(validSymbols) },
     });
+  }
+
+  async enableTokenTradingWithCache(beEnabledTokenAddr: string, enable = true) {
+    if (!beEnabledTokenAddr) {
+      this.logger.log('{enableTokenTradingWithCache} empty addr');
+      return;
+    }
+
+    const walletAddr = this.pancakeswapV2Service.wallet.address;
+    // ignore if cached
+    if (enable && this.addressApprovalCache.isApproved(walletAddr, beEnabledTokenAddr)) {
+      return;
+    }
+
+    await this.pancakeswapV2Service.enableTradeForToken(beEnabledTokenAddr, enable);
+    await this.addressApprovalCache.set(walletAddr, beEnabledTokenAddr, enable);
   }
 }

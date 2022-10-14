@@ -51,6 +51,7 @@ export const CommonBscSymbol: Record<UpperCaseSymbol, CommonSymbol> = {
 const CommonBscSymbolTestNet = CommonBscSymbol;
 CommonBscSymbolTestNet.WBNB.address = '0xae13d989dac2f0debff460ac112a837c89baa7cd';
 CommonBscSymbolTestNet.BNB.address = CommonBscSymbolTestNet.WBNB.address;
+CommonBscSymbolTestNet.CAKE.address = '0xFa60D973F7642B748046464e165A65B7323b0DEE';
 
 const CommonBscQuoteSymbols = {
   56: CommonBscSymbol,

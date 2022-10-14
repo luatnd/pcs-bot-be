@@ -9,6 +9,7 @@ import { AppError } from '../../libs/errors/base.error';
 import { CommonBscQuoteSymbol } from '../pair-realtime-data/const/CommonBSCSymbol';
 import { round } from '../utils/number';
 import { QuotationResult } from './type';
+import { ERC_20_ABI } from '../blockchain/_utils/abi/erc20_abi';
 
 export type AppSwapOption = {
   gasPrice?: number; // in wei
@@ -24,7 +25,7 @@ export class PancakeswapV2Service {
 
   private provider: ethers.providers.BaseProvider;
   private routerContract: Contract;
-  private wallet: Wallet;
+  public wallet: Wallet;
 
   public SLIPPAGE_DENOMINATOR = 10000;
 
@@ -296,6 +297,31 @@ export class PancakeswapV2Service {
       ...rc,
       duration: round((durationStop - durationStart) / 1000, 2),
     };
+  }
+
+  async enableTradeForToken(tokenAddress: string, enable = true): Promise<any> {
+    const durationStart = Date.now();
+
+    try {
+      // function approve(address spender, uint value) external returns (bool);
+      const currencyTokenContract = new ethers.Contract(tokenAddress, ERC_20_ABI, this.provider);
+      const rawTxn = await currencyTokenContract.populateTransaction.approve(
+        this.routerContract.address,
+        enable ? ethers.constants.MaxUint256 : 0,
+      );
+      const sendTxn = await this.wallet.sendTransaction(rawTxn);
+      const receipt = await sendTxn.wait();
+
+      const durationStop = Date.now();
+      const rc = this.normalizeReceipt(receipt);
+
+      return {
+        ...rc,
+        duration: round((durationStop - durationStart) / 1000, 2),
+      };
+    } catch (e) {
+      return null;
+    }
   }
 
   normalizeReceipt(r: ethers.providers.TransactionReceipt): {

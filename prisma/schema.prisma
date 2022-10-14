@@ -235,6 +235,17 @@ model ActiveTradingPair {
   @@map("active_trading_pairs")
 }
 
+// this wallet has approved which contract
+model ApprovedContract {
+  id                   Int        @id @default(autoincrement())
+  wallet               String
+  contract             String
+  created_at           DateTime   @default(now())
+
+  @@unique([wallet, contract])
+  @@map("approved_contracts")
+}
+
 
 model AppConfig {
   key                  String   @id

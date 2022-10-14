@@ -37,6 +37,20 @@ export class NewPairTradingResolver {
     return true;
   }
 
+  @Mutation(() => Boolean)
+  async approveToken(
+    @Args('pw') pw: string,
+    @Args('token') token: string,
+    @Args('enable') enable: boolean,
+  ): Promise<any> {
+    if (pw !== this.configService.get<string>('DEBUG_PASSWORD')) {
+      throw new AppError('Invalid password', 'InvalidDebugPassword');
+    }
+
+    await this.newPairTradingService.enableTokenTradingWithCache(token, enable);
+    return true;
+  }
+
   @Query(() => Boolean)
   async handleLpCreatedEventDebug(@Args('pw') pw: string): Promise<any> {
     if (pw !== this.configService.get<string>('DEBUG_PASSWORD')) {

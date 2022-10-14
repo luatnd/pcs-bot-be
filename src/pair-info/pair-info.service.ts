@@ -6,6 +6,7 @@ import { PairCreateInput } from '../prisma/@generated/graphql/pair/pair-create.i
 import { ChainId } from '../blockchain/_utils/const';
 import { PrismaErrorCode } from '../prisma/const';
 import { MAX } from 'class-validator';
+import { round } from '../utils/number';
 
 @Injectable()
 export class PairInfoService {
@@ -28,7 +29,10 @@ export class PairInfoService {
       const pairAgeInMinutes = (Date.now() - new Date(dtPair.createdAt).getTime()) / (60 * 1000);
       const allow = 0 < pairAgeInMinutes && pairAgeInMinutes < MAX_MINUTES_ALLOWED;
       if (!allow) {
-        this.logger.debug(`{createPool} SKIP: created ${pairAgeInMinutes}min ago > ${MAX_MINUTES_ALLOWED}min allowed`);
+        // eslint-disable-next-line max-len
+        this.logger.debug(
+          `{createPool} SKIP: created ${round(pairAgeInMinutes, 2)}min ago > ${MAX_MINUTES_ALLOWED}min allowed`,
+        );
         return;
       }
     } catch (e) {

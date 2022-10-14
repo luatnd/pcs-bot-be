@@ -1240,6 +1240,15 @@ export class NewPairTradingService {
     for (let i = 0, c = validSymbols.length; i < c; i++) {
       const item = validSymbols[i];
       this.activeQuoteSymbols.set(item, true);
+
+      // try to approve this token
+      try {
+        const commonSymbol = CommonBscQuoteSymbol[item];
+        const address = commonSymbol?.address;
+        if (address) {
+          await this.enableTokenTradingWithCache(address);
+        }
+      } catch (e) {}
     }
 
     await this.prisma.appConfig.update({

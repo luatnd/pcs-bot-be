@@ -27,6 +27,7 @@ export class NewPairTradingService {
   private readonly logger = new Logger(NewPairTradingService.name);
 
   public activeTradingPairs: ActiveTradingPairs;
+  public activeQuoteSymbols: Map<string, true> = new Map();
 
   constructor(
     private prisma: PrismaService,
@@ -35,6 +36,7 @@ export class NewPairTradingService {
     private pairRealtimeDataService: PairRealtimeDataService,
   ) {
     this.activeTradingPairs = new ActiveTradingPairs(prisma);
+    this.loadSupportedQuoteSymbols();
   }
 
   @OnEvent('lp.created', { async: true })
@@ -72,6 +74,14 @@ export class NewPairTradingService {
     } catch (e) {
       this.logger.warn('{handleLpCreatedEvent} pairDynamicData.create: e.code, e: ', e.code, e);
       // return;
+    }
+
+    const token0Symbol = payload.data?.token0?.symbol;
+    const token1Symbol = payload.data?.token1?.symbol;
+    const tradeEnabled = this.activeQuoteSymbols.has(token0Symbol) || this.activeQuoteSymbols.has(token1Symbol);
+    if (!tradeEnabled) {
+      this.logger.debug(`SKIP: ${token0Symbol}/${token1Symbol} no active quote token was enabled`);
+      return;
     }
 
     this.startNewPairTradingFlow(payload);
@@ -142,8 +152,8 @@ export class NewPairTradingService {
 
       if (!!tradingIntent) {
         // try tp or sl if status=FindingExit
-        await this.tryTp(payload, tradingIntent);
-        await this.trySl(payload);
+        const q = await this.tryTp(payload, tradingIntent);
+        await this.trySl(payload, tradingIntent, q);
       }
     } catch (e) {}
   }
@@ -484,13 +494,22 @@ export class NewPairTradingService {
     }
     // const bi = 1, qi = 0; // FAKE: this code for debug only
 
-    const baseTokenData = pData['token' + bi]; // Can be token0 or token1
-    const quoteTokenData = pData['token' + qi]; // Can be token0 or token1
+    const baseTokenData = pData['token' + bi] as DTToken; // Can be token0 or token1
+    const quoteTokenData = pData['token' + qi] as DTToken; // Can be token0 or token1
     const baseReserve = pData['reserve' + bi];
     const quoteReserve = pData['reserve' + qi];
     // const baseInitialReserve = pData.initialReserve0;
     // const quoteInitialReserve = pData.initialReserve1;
     this.logger.log('{validateQuotation} [bi, qi]: ' + `[${bi}, ${qi}]`);
+
+    /**
+     * We only trade on some currency WBNB, USDT, ...
+     * Sometime we may enable USDT only.
+     */
+    const quoteSymbol = quoteTokenData.symbol;
+    if (!this.activeQuoteSymbols.has(quoteSymbol)) {
+      throw new AppError(`{validateQuotation} SKIP: ${quoteSymbol} is not activeQuoteSymbols`, 'NotActiveSymbol');
+    }
 
     // eslint-disable-next-line max-len
     const base = this.pancakeswapV2Service.getAppToken(
@@ -723,7 +742,6 @@ export class NewPairTradingService {
     }
 
     return {
-      tradingDirectiveAutoConfig,
       lpSizeUsd,
       minLpSizeUsd,
     };
@@ -873,7 +891,7 @@ export class NewPairTradingService {
       // eslint-disable-next-line max-len
       this.logger.warn(`SKIP: because of priceImpact=${priceImpactPercent}% larger than ${maxPriceImpactPercent}%`);
       await this.reverseTradeOnError(tradingIntent, purpose);
-      return;
+      return q;
     }
 
     // Validate target price
@@ -894,7 +912,7 @@ export class NewPairTradingService {
     if (!shouldTp) {
       this.logger.debug('{tryTp} SKIP: not reach tp_target');
       await this.unlockTrade(tradingIntent, purpose);
-      return;
+      return q;
     }
 
     // if all cond met => Create order:
@@ -915,7 +933,7 @@ export class NewPairTradingService {
       this.logger.error(`swapTokensWithTradeObject: e: `, e);
       console.error(e); // This is only way to log this error to console
       await this.reverseTradeOnError(tradingIntent, purpose);
-      return;
+      return q;
     }
 
     // Save to trade history
@@ -965,10 +983,186 @@ export class NewPairTradingService {
 
     // Stop trade for this pair because of TP
     this.stopNewPairTradingFlow(p);
+
+    return q;
   }
 
-  async trySl(p: PairCreateInput, tradingIntent?: TradingIntend) {
-    // TODO
+  /**
+   * NOTE: quotation: trySL can use same ValidateQuotation with tryTP,
+   * it's ok but be careful when doing sth base on $purpose var
+   */
+  async trySl(p: PairCreateInput, tradingIntent?: TradingIntend, quotation?: ValidateQuotation) {
+    if (!this.isActiveTradingPair(p.id)) {
+      this.logger.debug('Not isActiveTradingPair: ' + p.id);
+      return;
+    }
+
+    // Only place entry for: status = FindingExit
+    try {
+      tradingIntent = await this.validateTradingIntend(p, tradingIntent, TradingIntendStatus.FindingExit);
+    } catch (e) {
+      this.logger.error('{trySl.validateTradingIntend} e.code: ' + e.code, e);
+      return;
+    }
+
+    const purpose = 'sl';
+    await this.lockTrade(tradingIntent, purpose);
+
+    const tradingDirectiveAutoConfig = await this.prisma.tradingDirectiveAutoConfig.findFirst();
+    if (tradingDirectiveAutoConfig === null) {
+      this.logger.error(new AppError('{trySl} SKIP: tradingDirectiveAutoConfig not exist', 'MissingDbConfig'));
+      await this.reverseTradeOnError(tradingIntent, purpose);
+      return;
+    }
+
+    // LP for selling don't need to be big enough, warning is enough
+    let lpInfo: {
+      lpSizeUsd: number;
+      minLpSizeUsd: number;
+    };
+    try {
+      lpInfo = await this.validateLpSize(p, tradingDirectiveAutoConfig);
+    } catch (e) {
+      this.logger.warn('{trySl.validateLpSize} e.code: ' + e.code, e);
+    }
+    const { lpSizeUsd } = lpInfo;
+
+    // validate entry price
+    const entryPrice = tradingIntent.entry?.toNumber();
+    if (!entryPrice) {
+      this.logger.error('{trySl} SKIP: tradingIntent.entry empty');
+      await this.unlockTrade(tradingIntent, purpose);
+      return;
+    }
+
+    // ---- get realtime quote -----
+    let q: ValidateQuotation;
+    try {
+      q =
+        quotation ??
+        (await this.validateQuotationForSellExit(p, tradingIntent, purpose, tradingDirectiveAutoConfig, lpSizeUsd));
+    } catch (e) {
+      this.logger.warn(e); // This is how to log to file logger
+      console.error(e); // This is only way to log this error to console
+      await this.reverseTradeOnError(tradingIntent, purpose);
+      return;
+    }
+    const { base, quote, quotes, maxPriceImpactPercent, tokenAmountToSell } = q;
+
+    this.logger.log('{trySl} quotes: ', {
+      trade: '... => Complex object',
+      midPrice: quotes.midPrice.toSignificant(),
+      executionPrice: quotes.executionPrice.toSignificant(),
+      nextMidPrice: quotes.nextMidPrice.toSignificant(),
+      priceImpact: quotes.priceImpact.toSignificant(),
+      minimumAmountOut: quotes.minimumAmountOut,
+      // number of token amount of base in LP
+      pooledTokenAmount0: quotes.pooledTokenAmount0,
+      // number of token amount of quote in LP
+      pooledTokenAmount1: quotes.pooledTokenAmount1,
+      // 1 base = x quote
+      token0Price: quotes.token0Price,
+      // 1 quote = x base
+      token1Price: quotes.token1Price,
+    });
+
+    // Validate price impact
+    const priceImpactPercent = Number(quotes.priceImpact.toSignificant());
+    // eslint-disable-next-line max-len
+    this.logger.verbose(
+      '{trySl} priceImpactPercent, maxAllowed: ' + `${priceImpactPercent}% ${maxPriceImpactPercent}%`,
+    );
+    // We don't care price impact when taking SL
+
+    // Validate target price
+    // sell price: 1 out = ? in
+    const executionPrice = Number(quotes.executionPrice.toSignificant());
+    const slTarget = tradingDirectiveAutoConfig.sl_target.toNumber();
+    const slTargetPrice = entryPrice * slTarget;
+    const shouldSl = executionPrice < slTargetPrice;
+    this.logger.debug(
+      '{trySl} ' +
+        JSON.stringify({
+          currentPrice: executionPrice,
+          targetPrice: slTargetPrice,
+          current: round(entryPrice / slTargetPrice, 3),
+          target: slTarget,
+        }),
+    );
+    if (!shouldSl) {
+      this.logger.debug('{tryTp} SKIP: not reach sl_target');
+      await this.unlockTrade(tradingIntent, purpose);
+      return;
+    }
+
+    // if all cond met => Create order:
+    let swapResult;
+    const opt: AppSwapOption = {};
+    if (tradingDirectiveAutoConfig.fixed_gas_price_in_gwei) {
+      opt.gasPrice = tradingDirectiveAutoConfig.fixed_gas_price_in_gwei * 1e9;
+    }
+    try {
+      swapResult = await this.pancakeswapV2Service.swapTokensWithTradeObject(
+        quotes.trade,
+        quotes.minimumAmountOut,
+        quote,
+        base,
+        opt,
+      );
+    } catch (e) {
+      this.logger.error(`swapTokensWithTradeObject: e: `, e);
+      console.error(e); // This is only way to log this error to console
+      await this.reverseTradeOnError(tradingIntent, purpose);
+      return;
+    }
+
+    // Save to trade history
+    try {
+      const sellPrice = executionPrice;
+      // const buyPrice = 1 / executionPrice;
+      // It's approximately amount, not strict equal
+      // sellAmount * sellPrice
+      const estimatedTokenReceived = tokenAmountToSell * sellPrice;
+      const historyEntry = await this.prisma.tradeHistory.create({
+        data: {
+          sell: base.symbol,
+          buy: quote.symbol,
+          sell_amount: tokenAmountToSell,
+          received_amount: Number(estimatedTokenReceived),
+          base_price: sellPrice, // 1 base = ? quote
+          price_impact_percent: Number(quotes.priceImpact.toSignificant()),
+          status: TradeHistoryStatus.S,
+          duration: swapResult.duration,
+          receipt: swapResult,
+        },
+      });
+      this.logger.verbose('{tryPlaceBuyEntry} tradeHistory.inserted: ');
+
+      const ti = await this.prisma.tradingIntend.update({
+        where: { id: tradingIntent.id },
+        data: {
+          // NOTE: When you sell all, note that this is not 100% correct number
+          // It's estimated, luckily it's might always smaller number than actual? => plz check
+          vol: Number(estimatedTokenReceived),
+          tp: sellPrice,
+          status: TradingIntendStatus.SL,
+          profit_percent: round((100 * (sellPrice - entryPrice)) / entryPrice, 2),
+        },
+      });
+      this.logger.verbose('{tryPlaceBuyEntry} tradingIntend.updated: ');
+
+      // NOTE: This event can be transmitted to FE / admin dashboard
+      this.eventEmitter.emit('trade.tp', {
+        pair: p,
+        historyEntry: historyEntry,
+        tradingIntent: ti,
+      });
+    } catch (e) {
+      this.logger.error('tradeHistory.create: e: ', e);
+    }
+
+    // Stop trade for this pair because of TP
+    this.stopNewPairTradingFlow(p);
   }
 
   setupTP(p: PairCreateInput) {
@@ -988,5 +1182,34 @@ export class NewPairTradingService {
 
   async getPairById(pairId: string): Promise<Pair> {
     return this.prisma.pair.findUnique({ where: { id: pairId } });
+  }
+
+  async loadSupportedQuoteSymbols() {
+    const cfg = await this.prisma.appConfig.findUnique({
+      where: { key: 'activeQuoteSymbols' },
+    });
+    if (cfg) {
+      const symbols: string[] = JSON.parse(cfg.value);
+      this.activeQuoteSymbols = new Map<string, true>();
+      for (let i = 0, c = symbols.length; i < c; i++) {
+        const item = symbols[i];
+        this.activeQuoteSymbols.set(item, true);
+      }
+    } else {
+      throw new AppError('No activeQuoteSymbols found, plz set app_config.activeQuoteSymbols');
+    }
+  }
+
+  async setSupportedQuoteSymbols(symbols: string[]) {
+    this.activeQuoteSymbols = new Map<string, true>();
+    for (let i = 0, c = symbols.length; i < c; i++) {
+      const item = symbols[i];
+      this.activeQuoteSymbols.set(item, true);
+    }
+
+    await this.prisma.appConfig.update({
+      where: { key: 'activeQuoteSymbols' },
+      data: { value: JSON.stringify(symbols) },
+    });
   }
 }

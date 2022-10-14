@@ -15,6 +15,22 @@ export class NewPairTradingResolver {
     private configService: ConfigService,
   ) {}
 
+  @Mutation(() => String)
+  async setSupportedQuoteSymbols(@Args('symbols') symbols: string, @Args('pw') pw: string): Promise<string> {
+    if (pw !== this.configService.get<string>('DEBUG_PASSWORD')) {
+      throw new AppError('Invalid password', 'InvalidDebugPassword');
+    }
+
+    const a = symbols.split(',');
+    await this.newPairTradingService.setSupportedQuoteSymbols(a.map((i) => i.trim()));
+    return this.getSupportedQuoteSymbols();
+  }
+
+  @Query(() => String)
+  async getSupportedQuoteSymbols(): Promise<string> {
+    return Array.from(this.newPairTradingService.activeQuoteSymbols.keys()).join(',');
+  }
+
   @Mutation(() => Boolean)
   async forceLpCreatedEvent(@Args('pair') pair: PairCreateInput): Promise<boolean> {
     await this.newPairTradingService.handleLpCreatedEvent(pair);

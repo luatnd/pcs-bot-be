@@ -138,6 +138,7 @@ model TradingIntend {
   tp                  Decimal? @db.Decimal(24,12)
   sl                  Decimal? @db.Decimal(24,12)
   status              TradingIntendStatus
+  profit_percent      Float?
 
   created_at DateTime   @default(now())
   updated_at DateTime   @updatedAt
@@ -207,7 +208,8 @@ model TradeHistory {
   buy               String
   sell_amount       Decimal? @db.Decimal(24,12)
   received_amount   Decimal? @db.Decimal(24,12)
-  price             Decimal? @db.Decimal(24,12)
+  // buy price: 1 base = ? quote
+  base_price        Decimal? @db.Decimal(24,12)
   price_impact_percent      Decimal? @db.Decimal(5,2)
 
   status            TradeHistoryStatus @default(S)

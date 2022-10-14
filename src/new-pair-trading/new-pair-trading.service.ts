@@ -20,6 +20,7 @@ import { PairRealtimeDataService } from '../pair-realtime-data/pair-realtime-dat
 import { TradeHistoryStatus } from '../prisma/@generated/graphql/prisma/trade-history-status.enum';
 import { ActiveTradingPairs } from './util/ActiveTradingPairs';
 import { ValidateQuotation } from './type';
+import { round } from '../utils/number';
 
 @Injectable()
 export class NewPairTradingService {
@@ -265,6 +266,12 @@ export class NewPairTradingService {
    * @NOTE:
    *  BUY mean we trade `quote` to get `base` => give BUSD and get XXX
    *  SELL mean we trade `base` to get `quote` => give XXX and get BUSD
+   *
+   * And some of the words you need to investigate:
+   *  - base/quote
+   *  - in/out
+   *  - sell/buy
+   *  - token0/token1
    */
   async tryPlaceBuyEntry(p: PairCreateInput, tradingIntent?: TradingIntend) {
     if (!this.isActiveTradingPair(p.id)) {
@@ -334,14 +341,11 @@ export class NewPairTradingService {
       token1Price: quotes.token1Price,
     });
 
-    // sell price
+    // sell price: 1 out = ? in
     const executionPrice = Number(quotes.executionPrice.toSignificant());
-    const currentPrice = Number(quotes.midPrice.toSignificant());
-    const nextMidPrice = Number(quotes.nextMidPrice.toSignificant());
     const priceImpactPercent = Number(quotes.priceImpact.toSignificant());
 
     const MIN_PRICE_DELTA_FOLD = 5;
-
     // const initialListingPrice = 1;
     // // current_price/initial_listing_price <= 5
     // if (currentPrice / initialListingPrice > MIN_PRICE_DELTA_FOLD) {
@@ -352,17 +356,13 @@ export class NewPairTradingService {
     // }
     // eslint-disable-next-line max-len
     this.logger.verbose(
-      '{tryPlaceEntry} priceImpactPercent, maxAllowed: ',
-      priceImpactPercent,
-      maxPriceImpactPercent * 100,
+      '{tryPlaceEntry} priceImpactPercent, maxAllowed: ' + `${priceImpactPercent}% ${maxPriceImpactPercent}%`,
     );
 
     // price_impact <= 10%
-    if (priceImpactPercent > maxPriceImpactPercent * 100) {
+    if (priceImpactPercent > maxPriceImpactPercent) {
       // eslint-disable-next-line max-len
-      this.logger.warn(
-        `SKIP: because of priceImpact=${priceImpactPercent} larger than ${maxPriceImpactPercent * 100}%`,
-      );
+      this.logger.warn(`SKIP: because of priceImpact=${priceImpactPercent}% larger than ${maxPriceImpactPercent}%`);
       await this.reverseTradeOnError(tradingIntent, purpose);
       return;
     }
@@ -412,7 +412,7 @@ export class NewPairTradingService {
           buy: base.symbol,
           sell_amount: tokenAmountToSell,
           received_amount: Number(estimatedTokenReceived),
-          price: buyPrice, // 1 base = ? quote
+          base_price: buyPrice, // 1 base = ? quote
           price_impact_percent: Number(quotes.priceImpact.toSignificant()),
           status: TradeHistoryStatus.S,
           duration: swapResult.duration,
@@ -421,7 +421,7 @@ export class NewPairTradingService {
       });
       this.logger.verbose('{tryPlaceBuyEntry} tradeHistory.inserted: ');
 
-      await this.prisma.tradingIntend.update({
+      const ti = await this.prisma.tradingIntend.update({
         where: { id: tradingIntent.id },
         data: {
           // NOTE: When you sell all, note that this is not 100% correct number
@@ -437,6 +437,7 @@ export class NewPairTradingService {
       this.eventEmitter.emit('trade.entryCreated', {
         pair: p,
         historyEntry: historyEntry,
+        tradingIntent: ti,
       });
     } catch (e) {
       this.logger.error('tradeHistory.create: e: ', e);
@@ -489,7 +490,7 @@ export class NewPairTradingService {
     const quoteReserve = pData['reserve' + qi];
     // const baseInitialReserve = pData.initialReserve0;
     // const quoteInitialReserve = pData.initialReserve1;
-    this.logger.log('{validateQuotation} [bi, qi]: ', [bi, qi]);
+    this.logger.log('{validateQuotation} [bi, qi]: ' + `[${bi}, ${qi}]`);
 
     // eslint-disable-next-line max-len
     const base = this.pancakeswapV2Service.getAppToken(
@@ -521,6 +522,9 @@ export class NewPairTradingService {
       lpSizeUsd,
     );
     // maxPossibleSellAmount = 50; // FAKE: this is for debug only
+    if (!(maxPossibleSellAmount > 0)) {
+      throw new AppError('{validateQuotation} SKIP: Invalid sell amount: ' + maxPossibleSellAmount, 'CannotGetMaxVol');
+    }
 
     // TODO: Approve max amount for all the common quotes token when program started,
     //    cache approved contract to db to avoid re-approve, save time
@@ -821,20 +825,10 @@ export class NewPairTradingService {
     }
     const { lpSizeUsd, minLpSizeUsd } = lpInfo;
 
-    const tpTarget = tradingDirectiveAutoConfig.tp_target.toNumber();
+    // validate entry price
     const entryPrice = tradingIntent.entry?.toNumber();
     if (!entryPrice) {
       this.logger.error('{tryTp} SKIP: tradingIntent.entry empty');
-      await this.unlockTrade(tradingIntent, purpose);
-      return;
-    }
-    const currentPrice = 1;
-    const shouldTp = currentPrice >= entryPrice * tpTarget;
-    if (!shouldTp) {
-      // eslint-disable-next-line max-len
-      this.logger.debug(
-        '{tryTp} not reach tp: ' + `currentPrice(${currentPrice}) >= entryPrice(${entryPrice}) * tpTarget${tpTarget}`,
-      );
       await this.unlockTrade(tradingIntent, purpose);
       return;
     }
@@ -868,11 +862,109 @@ export class NewPairTradingService {
       token1Price: quotes.token1Price,
     });
 
-    // TODO: here
-    //  and validate the execution price
+    // Validate price impact
+    const priceImpactPercent = Number(quotes.priceImpact.toSignificant());
+    // eslint-disable-next-line max-len
+    this.logger.verbose(
+      '{tryPlaceEntry} priceImpactPercent, maxAllowed: ' + `${priceImpactPercent}% ${maxPriceImpactPercent}%`,
+    );
+    // price_impact <= 10%
+    if (priceImpactPercent > maxPriceImpactPercent) {
+      // eslint-disable-next-line max-len
+      this.logger.warn(`SKIP: because of priceImpact=${priceImpactPercent}% larger than ${maxPriceImpactPercent}%`);
+      await this.reverseTradeOnError(tradingIntent, purpose);
+      return;
+    }
 
-    // Debug: after all we unlock: This is for debug only
-    await this.unlockTrade(tradingIntent, purpose);
+    // Validate target price
+    // sell price: 1 out = ? in
+    const executionPrice = Number(quotes.executionPrice.toSignificant());
+    const tpTarget = tradingDirectiveAutoConfig.tp_target.toNumber();
+    const tpTargetPrice = entryPrice * tpTarget;
+    const shouldTp = executionPrice >= tpTargetPrice;
+    this.logger.debug(
+      '{tryTp} ' +
+        JSON.stringify({
+          currentPrice: executionPrice,
+          targetPrice: tpTargetPrice,
+          current: round(entryPrice / tpTargetPrice, 3),
+          target: tpTarget,
+        }),
+    );
+    if (!shouldTp) {
+      this.logger.debug('{tryTp} SKIP: not reach tp_target');
+      await this.unlockTrade(tradingIntent, purpose);
+      return;
+    }
+
+    // if all cond met => Create order:
+    let swapResult;
+    const opt: AppSwapOption = {};
+    if (tradingDirectiveAutoConfig.fixed_gas_price_in_gwei) {
+      opt.gasPrice = tradingDirectiveAutoConfig.fixed_gas_price_in_gwei * 1e9;
+    }
+    try {
+      swapResult = await this.pancakeswapV2Service.swapTokensWithTradeObject(
+        quotes.trade,
+        quotes.minimumAmountOut,
+        quote,
+        base,
+        opt,
+      );
+    } catch (e) {
+      this.logger.error(`swapTokensWithTradeObject: e: `, e);
+      console.error(e); // This is only way to log this error to console
+      await this.reverseTradeOnError(tradingIntent, purpose);
+      return;
+    }
+
+    // Save to trade history
+    try {
+      const sellPrice = executionPrice;
+      const buyPrice = 1 / executionPrice;
+      // It's approximately amount, not strict equal
+      // sellAmount * sellPrice
+      const estimatedTokenReceived = tokenAmountToSell * sellPrice;
+      const historyEntry = await this.prisma.tradeHistory.create({
+        data: {
+          sell: base.symbol,
+          buy: quote.symbol,
+          sell_amount: tokenAmountToSell,
+          received_amount: Number(estimatedTokenReceived),
+          base_price: sellPrice, // 1 base = ? quote
+          price_impact_percent: Number(quotes.priceImpact.toSignificant()),
+          status: TradeHistoryStatus.S,
+          duration: swapResult.duration,
+          receipt: swapResult,
+        },
+      });
+      this.logger.verbose('{tryPlaceBuyEntry} tradeHistory.inserted: ');
+
+      const ti = await this.prisma.tradingIntend.update({
+        where: { id: tradingIntent.id },
+        data: {
+          // NOTE: When you sell all, note that this is not 100% correct number
+          // It's estimated, luckily it's might always smaller number than actual? => plz check
+          vol: Number(estimatedTokenReceived),
+          tp: sellPrice,
+          status: TradingIntendStatus.TP,
+          profit_percent: round((100 * (sellPrice - entryPrice)) / entryPrice, 2),
+        },
+      });
+      this.logger.verbose('{tryPlaceBuyEntry} tradingIntend.updated: ');
+
+      // NOTE: This event can be transmitted to FE / admin dashboard
+      this.eventEmitter.emit('trade.tp', {
+        pair: p,
+        historyEntry: historyEntry,
+        tradingIntent: ti,
+      });
+    } catch (e) {
+      this.logger.error('tradeHistory.create: e: ', e);
+    }
+
+    // Stop trade for this pair because of TP
+    this.stopNewPairTradingFlow(p);
   }
 
   async trySl(p: PairCreateInput, tradingIntent?: TradingIntend) {

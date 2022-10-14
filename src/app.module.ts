@@ -15,6 +15,7 @@ import { PairInfoModule } from './pair-info/pair-info.module';
 import { NewPairTradingModule } from './new-pair-trading/new-pair-trading.module';
 import { PairRealtimeDataModule } from './pair-realtime-data/pair-realtime-data.module';
 import { PancakeswapV2Module } from './pancakeswap-v2/pancakeswap-v2.module';
+import { NotificationModule } from './notification/notification.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { PancakeswapV2Module } from './pancakeswap-v2/pancakeswap-v2.module';
     NewPairTradingModule,
     PairRealtimeDataModule,
     PancakeswapV2Module,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [AppService, AppResolver],

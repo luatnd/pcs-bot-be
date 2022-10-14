@@ -114,21 +114,13 @@ export class PancakeswapV2Service {
 
       /*
       NOTE:
-        for ***Price props with `BUYING base` case:
-          It's depend on route we will have ***Price will be token0/token1
-          It's always be quote token
-          It's always be ***Price = 1 quotes <=> ? base
-          It means "sell price"
-          eg: Buying ANM (selling BNB) => ***Price = 1 BNB = ? ANM
-        for ***Price props with `SELLING base` case:
-          // TODO:
-          eg: Selling ANM (Buying BNB) => ***Price = 1 ANM = ? BNB
-
-       => TODO: So it's selling price? 1 owning_selling token = ? token we will get
+        ***Price field: plz read the comment on Trade class: node_modules/@pancakeswap/sdk/dist/entities/trade.d.ts
+        => So it's selling price? 1 owning_selling token = ? token we will get
+        <=> 1 out = ? in
        */
       // midPrice is current price, right before executio, eq to token0/1Price right after create LP
       midPrice: route.midPrice,
-      // Price display on Pancake, right at execution, 1 quotes = ? base
+      // Price display on Pancake, right at execution, is: pooledTokenAmountOut / pooledTokenAmountIn
       executionPrice: trade.executionPrice,
       nextMidPrice: trade.nextMidPrice,
       priceImpact: trade.priceImpact,

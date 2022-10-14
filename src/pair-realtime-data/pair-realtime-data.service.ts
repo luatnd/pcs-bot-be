@@ -54,6 +54,10 @@ export class PairRealtimeDataService {
     // If not in cache yet, fetch the price from API
     try {
       const priceUsd = await this.fetchSymbolPriceFromInternet(symbol);
+      if (priceUsd === undefined) {
+        return null;
+      }
+
       this.symbolPriceUsdCache.set(k, priceUsd);
       return priceUsd;
     } catch (e) {
@@ -76,7 +80,7 @@ export class PairRealtimeDataService {
     return knownSymbol.address === address && knownSymbol.isStableCoin === true;
   }
 
-  private async fetchSymbolPriceFromInternet(symbol: string): Promise<number> {
+  private async fetchSymbolPriceFromInternet(symbol: string): Promise<number | undefined> {
     const knownSymbol = CommonBscSymbol[symbol];
     if (!knownSymbol) {
       throw new AppError(

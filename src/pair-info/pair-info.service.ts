@@ -5,6 +5,7 @@ import { DtPair } from './type/dextool';
 import { PairCreateInput } from '../prisma/@generated/graphql/pair/pair-create.input';
 import { ChainId } from '../blockchain/_utils/const';
 import { PrismaErrorCode } from '../prisma/const';
+import { MAX } from 'class-validator';
 
 @Injectable()
 export class PairInfoService {
@@ -20,6 +21,20 @@ export class PairInfoService {
   async createPool(dtPair: DtPair) {
     // console.log('{createPool} dtPair: ', dtPair);
     const pair = this.toAppPair(dtPair);
+    const MAX_MINUTES_ALLOWED = 10;
+
+    // NOTE: We should ignore if pool is created long time ago
+    try {
+      const pairAgeInMinutes = (Date.now() - new Date(dtPair.createdAt).getTime()) / (60 * 1000);
+      if (pairAgeInMinutes > MAX_MINUTES_ALLOWED) {
+        this.logger.debug(`{createPool} SKIP: created ${pairAgeInMinutes}min ago > ${MAX_MINUTES_ALLOWED}min allowed`);
+        return;
+      }
+    } catch (e) {
+      this.logger.warn('{createPool} Cannot validate LP age');
+      return;
+    }
+
     try {
       const r = await this.prisma.pair.create({ data: pair });
       this.logger.verbose('{createPool} storedRecord: ' + r.id);

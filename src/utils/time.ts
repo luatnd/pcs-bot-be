@@ -10,12 +10,11 @@ export const sleep = delay;
  */
 export async function retryUntil(canStop: () => boolean, maxRetry = 10, retryIntervalMs = 1000) {
   let retry = 0;
-  const MAX_RETRY = 10;
-  while (retry < MAX_RETRY) {
+  while (retry < maxRetry) {
     retry++;
 
     if (canStop()) {
-      retry = MAX_RETRY;
+      retry = maxRetry;
     } else {
       await sleep(retryIntervalMs);
     }

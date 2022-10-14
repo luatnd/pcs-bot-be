@@ -13,12 +13,11 @@ import { PrismaErrorCode } from '../prisma/const';
 import { TradingIntend } from '../prisma/@generated/graphql/trading-intend/trading-intend.model';
 import { Pair } from '../prisma/@generated/graphql/pair/pair.model';
 import { AppError } from '../../libs/errors/base.error';
-import { CommonBscQuoteAddress, CommonBscQuoteSymbol } from '../pair-realtime-data/const/CommonBSCSymbol';
+import { CommonBscQuoteAddress } from '../pair-realtime-data/const/CommonBSCSymbol';
 // eslint-disable-next-line max-len
 import { TradingDirectiveAutoConfig } from '../prisma/@generated/graphql/trading-directive-auto-config/trading-directive-auto-config.model';
 import { PairRealtimeDataService } from '../pair-realtime-data/pair-realtime-data.service';
 import { TradeHistoryStatus } from '../prisma/@generated/graphql/prisma/trade-history-status.enum';
-import { ethers } from 'ethers';
 
 type PairId = string;
 
@@ -355,9 +354,9 @@ export class NewPairTradingService {
     //    cache approved contract to db to avoid re-approve, save time
     // quoteTokenAmountToSell in token, force min(5% LP, $500) to get quotes
     const quoteTokenAmountToSell = amountOfOwningTokenWeAttemptToSell;
-    const MAX_PRICE_IMPACT = 10 / 100;
+    const maxPriceImpactPercent = tradingDirectiveAutoConfig.slippage_tolerant_percent?.toNumber() ?? 10;
     const denom = this.pancakeswapV2Service.SLIPPAGE_DENOMINATOR; // denominator is 10k in PcsV2 service
-    const slippageTolerant = Math.floor(MAX_PRICE_IMPACT * denom).toString();
+    const slippageTolerant = Math.floor((maxPriceImpactPercent / 100) * denom).toString();
     const quotes = await this.pancakeswapV2Service.getQuotation(
       base,
       quote,
@@ -397,11 +396,19 @@ export class NewPairTradingService {
     //   );
     //   return;
     // }
-    this.logger.verbose('{tryPlaceEntry} priceImpactPercent, maxAllowed: ', priceImpactPercent, MAX_PRICE_IMPACT * 100);
+    // eslint-disable-next-line max-len
+    this.logger.verbose(
+      '{tryPlaceEntry} priceImpactPercent, maxAllowed: ',
+      priceImpactPercent,
+      maxPriceImpactPercent * 100,
+    );
 
     // price_impact <= 10%
-    if (priceImpactPercent > MAX_PRICE_IMPACT * 100) {
-      this.logger.warn(`SKIP: because of priceImpact=${priceImpactPercent} larger than ${MAX_PRICE_IMPACT * 100}%`);
+    if (priceImpactPercent > maxPriceImpactPercent * 100) {
+      // eslint-disable-next-line max-len
+      this.logger.warn(
+        `SKIP: because of priceImpact=${priceImpactPercent} larger than ${maxPriceImpactPercent * 100}%`,
+      );
       return;
     }
 
@@ -582,15 +589,14 @@ export class NewPairTradingService {
     const lpSizeUsd = (p.data as DtPairDynamicData).liquidity; // or can get LP from router quotation
     this.logger.debug('{tryPlaceEntry} lpSizeUsd: ' + lpSizeUsd);
 
-    // TODO: Turn this on for production, comment this for debug
-    // if (lpSizeUsd < minLpSizeUsd) {
-    //   // this.logger.warn("SKIP: LP is not big enough: " + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`);
-    //   // return;
-    //   throw new AppError(
-    //     'SKIP: LP is not big enough: ' + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`,
-    //     'LpTooSmall',
-    //   );
-    // }
+    if (lpSizeUsd < minLpSizeUsd) {
+      // this.logger.warn("SKIP: LP is not big enough: " + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`);
+      // return;
+      throw new AppError(
+        'SKIP: LP is not big enough: ' + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`,
+        'LpTooSmall',
+      );
+    }
 
     return {
       tradingDirectiveAutoConfig,

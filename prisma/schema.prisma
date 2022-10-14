@@ -173,6 +173,7 @@ model TradingDirectiveAutoConfig {
   safe_lp_size_usd           Decimal @db.Decimal(10,2)
   // Eg: trading vol cannot exceed 5% of LP
   max_vol_percent_of_lp      Decimal @db.Decimal(4,1)
+  slippage_tolerant_percent  Decimal? @db.Decimal(4,1)
 
   // empty or <= 0 mean auto gas_price
   fixed_gas_price_in_gwei    Int?

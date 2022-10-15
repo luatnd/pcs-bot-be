@@ -331,6 +331,23 @@ export class NewPairTradingService {
     }
     const { lpSizeUsd, minLpSizeUsd } = lpInfo;
 
+    /**
+     * Do not entry if LP was created to long ago
+     * - Some LP add a very small LP > Big > Big > Big ==> Try to avoid if over 10m
+     */
+    const entryMaxDelayInMin = 6;
+    const intendCreatedFor = Date.now() - tradingIntent.created_at.getTime();
+    if (intendCreatedFor > entryMaxDelayInMin * 60000) {
+      // eslint-disable-next-line max-len
+      this.logger.verbose(
+        `{tryPlaceEntry} SKIP: It's ${round(intendCreatedFor / (1000 * 60), 2)} mins over ${entryMaxDelayInMin} mins`,
+      );
+      return;
+    }
+
+    // TODO: Add validation using DEXTscore:
+    //  https://www.dextools.io/app/bnb/pair-explorer/0x0994c6b0bc1cbd6ef720bc11f9a23c64ff29c6d9
+
     // ---- get realtime quote -----
     let q: ValidateQuotation;
     try {
@@ -750,7 +767,7 @@ export class NewPairTradingService {
       // this.logger.warn("SKIP: LP is not big enough: " + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`);
       // return;
       throw new AppError(
-        'SKIP: LP is not big enough: ' + `Actual:${lpSizeUsd}USD < Expect:${minLpSizeUsd}USD`,
+        'SKIP: LP is not big enough: ' + `Actual:${round(lpSizeUsd, 2)}USD < Expect:${minLpSizeUsd}USD`,
         'LpTooSmall',
       );
     }

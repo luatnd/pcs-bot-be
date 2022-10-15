@@ -40,6 +40,12 @@ export class PairInfoService {
       return;
     }
 
+    // we should ignore if not trade on pancakev2
+    if (!pair.chain_id) {
+      this.logger.warn('{createPool} Not supported exchange: ' + pair.exchange_id);
+      return;
+    }
+
     try {
       const r = await this.prisma.pair.create({ data: pair });
       this.logger.verbose('{createPool} storedRecord: ' + r.id);

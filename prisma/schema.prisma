@@ -157,7 +157,7 @@ model TradingDirectiveRedListContract {
   created_at          DateTime   @default(now())
   updated_at          DateTime   @updatedAt
 
-  @@index([contract])
+  @@unique([contract])
   @@map("trading_directive_red_list_contracts")
 }
 

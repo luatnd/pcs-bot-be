@@ -23,7 +23,7 @@ import { ValidateQuotation } from './type';
 import { round } from '../utils/number';
 import { TradingDirectiveAuto } from './util/TradingDirectiveAuto';
 import { AddressApprovalCache } from '../pancakeswap-v2/util/AddressApprovalCache';
-import { add } from 'husky';
+import { TradingMode } from '../pair-info/TradingMode';
 
 @Injectable()
 export class NewPairTradingService {
@@ -33,6 +33,7 @@ export class NewPairTradingService {
   public activeQuoteSymbols: Map<string, true> = new Map();
   public tradingDirectiveAuto: TradingDirectiveAuto;
   public addressApprovalCache: AddressApprovalCache;
+  private tradingMode: TradingMode;
 
   constructor(
     private prisma: PrismaService,
@@ -46,6 +47,8 @@ export class NewPairTradingService {
     this.addressApprovalCache = new AddressApprovalCache(prisma);
 
     this.addressApprovalCache.loadData(pancakeswapV2Service.wallet.address).catch((e) => false);
+
+    this.tradingMode = TradingMode.getInstance(prisma);
   }
 
   @OnEvent('lp.created', { async: true })
@@ -269,6 +272,10 @@ export class NewPairTradingService {
   removePriceTracking(p: PairCreateInput) {
     // Remove this from active trading pair cache
     this.setActiveTradingPair(p.id, false);
+
+    // Remove from red list
+    this.tradingMode.setRedListContract(p.data?.token0?.id, false);
+    this.tradingMode.setRedListContract(p.data?.token1?.id, false);
   }
 
   /**

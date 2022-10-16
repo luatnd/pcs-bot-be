@@ -5,6 +5,8 @@ import { WSService } from '../../libs/socket-client/socket-client.service';
 import { AppError } from '../../libs/errors/base.error';
 import { DtPair, DTResponseType, NativeCurrencyPriceEventDataType, PairEventDataType } from './type/dextool';
 import { PairInfoService } from './pair-info.service';
+import { AppTradingMode, TradingMode } from './TradingMode';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class PairInfoServiceAuto implements OnModuleInit {
@@ -22,12 +24,11 @@ export class PairInfoServiceAuto implements OnModuleInit {
     max: 5,
   });
 
-  private singlePairModeData = {
-    enabled: true, // default is true, your must fire graphql mutation to start all pair
-    pairOnChainId: null,
-  };
+  private tradingMode: TradingMode;
 
-  constructor(private pairInfoService: PairInfoService) {}
+  constructor(private pairInfoService: PairInfoService, private prisma: PrismaService) {
+    this.tradingMode = TradingMode.getInstance(prisma);
+  }
 
   getWSService(url: string) {
     return new WSService(url, {
@@ -108,28 +109,6 @@ export class PairInfoServiceAuto implements OnModuleInit {
     }
   }
 
-  /**
-   * @param pairOnChainId null or empty mean for all pairs, disable single mode
-   */
-  setSinglePairModeFor(pairOnChainId: string) {
-    this.singlePairModeData.enabled = !!pairOnChainId;
-    if (this.singlePairModeData.enabled) {
-      this.logger.warn('[Runtime] Single pair mode ENABLED for ' + pairOnChainId + '\n');
-    } else {
-      this.logger.warn('[Runtime] Single pair mode DISABLED from ' + this.singlePairModeData.pairOnChainId + '\n');
-    }
-
-    this.singlePairModeData.pairOnChainId = pairOnChainId;
-  }
-
-  isSinglePairMode(): boolean {
-    return this.singlePairModeData.enabled;
-  }
-
-  getSinglePairModePairKey(): string {
-    return this.singlePairModeData.pairOnChainId;
-  }
-
   async filterPairEvent(message: any) {
     // console.log('{filterPairEvent} message: ', message);
 
@@ -176,17 +155,8 @@ export class PairInfoServiceAuto implements OnModuleInit {
     // }
     // await this.handleLPUpdate(pair);
 
-    // if (pair.token0.symbol !== 'SPOOKYS') {
-    //   return;
-    // }
-
-    // Skip all other pairs if in single pair mode
-    if (this.isSinglePairMode()) {
-      const allowedPairOnChainId = this.getSinglePairModePairKey();
-      const pairOnChainId = pair.id;
-      if (pairOnChainId !== allowedPairOnChainId) {
-        return;
-      }
+    if (!this.shouldHandlePair(pair)) {
+      return;
     }
 
     this.logger.debug('{handlePairEvent} : ' + this.pairInfoService.getPairName(pair));
@@ -217,6 +187,35 @@ export class PairInfoServiceAuto implements OnModuleInit {
 
     // run it
     throttleExecutor(p);
+  }
+
+  setTradingSubscriptionMode(mode: AppTradingMode, data?: any) {
+    return this.tradingMode.setTradingMode(mode, data);
+  }
+
+  shouldHandlePair(pair: DtPair): boolean {
+    switch (this.tradingMode.getTradingMode()) {
+      // Skip all other pairs if in single pair mode
+      case 'singlePair':
+        const allowedPairOnChainId = this.tradingMode.getSinglePairModePairKey();
+        const pairOnChainId = pair.id;
+        if (pairOnChainId !== allowedPairOnChainId) {
+          return false;
+        }
+        break;
+
+      // Skip pair if not contain red list contracts
+      case 'contracts':
+        const pairEnabled =
+          (pair.token0?.id && this.tradingMode.isRedListContractEnabled(pair.token0.id)) ||
+          (pair.token1?.id && this.tradingMode.isRedListContractEnabled(pair.token1.id));
+        if (!pairEnabled) {
+          return false;
+        }
+        break;
+    }
+
+    return true;
   }
 
   // async handleLPCreation(pair: DtPair) {

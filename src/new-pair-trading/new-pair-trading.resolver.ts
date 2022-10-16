@@ -51,7 +51,7 @@ export class NewPairTradingResolver {
     return true;
   }
 
-  @Query(() => Boolean)
+  // @Query(() => Boolean)
   async handleLpCreatedEventDebug(@Args('pw') pw: string): Promise<any> {
     if (pw !== this.configService.get<string>('DEBUG_PASSWORD')) {
       throw new AppError('Invalid password', 'InvalidDebugPassword');
@@ -85,7 +85,7 @@ export class NewPairTradingResolver {
     return true;
   }
 
-  @Query(() => Boolean)
+  // @Query(() => Boolean)
   async swapUnsafeDebug(@Args('pw') pw: string): Promise<any> {
     if (pw !== this.configService.get<string>('DEBUG_PASSWORD')) {
       throw new AppError('Invalid password', 'InvalidDebugPassword');
@@ -100,7 +100,7 @@ export class NewPairTradingResolver {
     return true;
   }
 
-  @Query(() => Boolean)
+  // @Query(() => Boolean)
   async tryTpDebug(@Args('pw') pw: string): Promise<any> {
     if (pw !== this.configService.get<string>('DEBUG_PASSWORD')) {
       throw new AppError('Invalid password', 'InvalidDebugPassword');
@@ -122,7 +122,7 @@ export class NewPairTradingResolver {
     return true;
   }
 
-  @Query(() => Boolean)
+  // @Query(() => Boolean)
   async trySlDebug(@Args('pw') pw: string): Promise<any> {
     if (pw !== this.configService.get<string>('DEBUG_PASSWORD')) {
       throw new AppError('Invalid password', 'InvalidDebugPassword');
